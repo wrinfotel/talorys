@@ -6,6 +6,8 @@ All notable changes to Talorys are listed here. Versions match the `create-talor
 
 ### Added
 
+- **Custom AI providers.** Connect any OpenAI-compatible API (OpenRouter, OpenAI, Groq, a local Ollama, ...) in Settings → AI: base URL, model and API key, with a built-in connectivity test. Cloudflare Workers AI stays the default and the fallback until a custom provider is configured; Disconnect switches back instantly. The API key is stored encrypted at rest and never returned by the API. Memory conflict checks (Clef) and semantic recall keep using Workers AI. See [docs/custom-ai-provider.md](docs/custom-ai-provider.md).
+- **Telegram bot.** Chat with your agent in Telegram and receive reminders and automation results in the same chat. Connect a @BotFather token in Settings → Integrations (the deploy URL is used as the webhook base) and pair your chat with a one-time `/start <code>`. The bot is single-owner: chats that never paired are ignored, and the webhook is protected with a Telegram secret token. `/new` starts a fresh conversation; delivery of notifications there follows its own toggle. The bot token is stored encrypted at rest. See [docs/telegram-bot.md](docs/telegram-bot.md).
 - **Chat alerts**: a system notification when a reply finishes or needs approval while the window is out of focus
 - A notification when a scheduled automation fails, sent once until it succeeds again
 
