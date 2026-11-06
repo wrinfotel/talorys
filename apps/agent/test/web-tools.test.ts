@@ -84,28 +84,25 @@ describe("web_fetch", () => {
 });
 
 describe("web_search", () => {
-  const ddgHtml = `
-    <div class="result">
-      <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone&amp;rut=abc">First  result</a>
-      <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fone">The &amp; first snippet</a>
-    </div>
-    <div class="result">
-      <a rel="nofollow" class="result__a" href="https://direct.example.com/two">Second result</a>
-      <a class="result__snippet" href="https://direct.example.com/two">Second snippet</a>
-    </div>`;
+  // "aHR0cHM6Ly9leGFtcGxlLmNvbS9vbmU=" is base64 of https://example.com/one (Bing's /ck/a redirect payload).
+  const bingHtml = `
+    <li class="b_algo"><h2><a href="/ck/a?&u=a1aHR0cHM6Ly9leGFtcGxlLmNvbS9vbmU=&ntb=1" h="ID=SERP">First  result</a></h2>
+      <div class="b_caption"><p>The &amp; first snippet</p></div></li>
+    <li class="b_algo"><h2><a href="https://direct.example.com/two">Second result</a></h2>
+      <p>Second snippet</p></li>`;
 
-  it("parses results and unwraps redirect links", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(okResponse(ddgHtml));
+  it("parses results and decodes redirect links", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse(bingHtml));
     http.fetch = fetchMock as unknown as typeof fetch;
     const result = (await run(webSearch, { query: "test query" })) as { results: { title: string; url: string; snippet: string }[] };
-    expect(fetchMock.mock.calls[0]![1]!.body).toContain("q=test+query");
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("q=test%20query");
     expect(result.results).toHaveLength(2);
     expect(result.results[0]).toEqual({ title: "First result", url: "https://example.com/one", snippet: "The & first snippet" });
     expect(result.results[1]!.url).toBe("https://direct.example.com/two");
   });
 
   it("returns a note when nothing was parsed", async () => {
-    http.fetch = vi.fn().mockResolvedValue(okResponse("<html><body>Anomaly detected</body></html>")) as unknown as typeof fetch;
+    http.fetch = vi.fn().mockResolvedValue(okResponse("<html><body>No results here</body></html>")) as unknown as typeof fetch;
     const result = (await run(webSearch, { query: "anything" })) as { results: unknown[]; note?: string };
     expect(result.results).toHaveLength(0);
     expect(result.note).toContain("No results");

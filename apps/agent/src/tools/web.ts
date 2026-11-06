@@ -141,34 +141,42 @@ interface WebResult {
   snippet: string;
 }
 
-/** DuckDuckGo redirect links (`//duckduckgo.com/l/?uddg=<encoded>`) unwrap to the target page. */
-function unwrapDdgHref(href: string): string {
+/**
+ * Bing wraps result links in `/ck/a` redirects whose `u` parameter is "a1" followed by
+ * the base64url-encoded target. Workers egress can't reach DuckDuckGo (it sits behind
+ * Cloudflare, which answers edge-to-edge fetches with error 1042), so Bing's plain HTML
+ * results are the no-key backend.
+ */
+function unwrapBingHref(href: string): string {
   const trimmed = href.trim();
-  if (!trimmed.includes("uddg=")) return trimmed;
+  if (!trimmed.includes("/ck/a")) return trimmed;
   try {
-    const absolute = trimmed.startsWith("//") ? `https:${trimmed}` : trimmed;
-    const target = new URL(absolute).searchParams.get("uddg");
-    if (target) return target;
+    const target = new URL(trimmed, "https://www.bing.com").searchParams.get("u");
+    if (target?.startsWith("a1")) {
+      const b64 = target.slice(2).replace(/-/g, "+").replace(/_/g, "/");
+      const decoded = atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4));
+      if (/^https?:\/\//.test(decoded)) return decoded;
+    }
   } catch {
-    // Not a redirect link after all; fall through to the raw href.
+    // Not a decodable redirect link; fall through to the raw href.
   }
   return trimmed;
 }
 
-function parseDdgResults(html: string): WebResult[] {
-  const anchors = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)];
-  const titles: { title: string; url: string }[] = [];
-  const snippets: string[] = [];
-  for (const [, attrs, inner] of anchors) {
-    const classes = /class="([^"]*)"/.exec(attrs ?? "")?.[1] ?? "";
-    if (classes.includes("result__a")) {
-      const href = /href="([^"]*)"/.exec(attrs ?? "")?.[1] ?? "";
-      titles.push({ title: stripHtml(inner ?? ""), url: unwrapDdgHref(href) });
-    } else if (classes.includes("result__snippet")) {
-      snippets.push(stripHtml(inner ?? ""));
-    }
+function parseBingResults(html: string): WebResult[] {
+  const results: WebResult[] = [];
+  for (const block of html.split('<li class="b_algo').slice(1)) {
+    const chunk = block.slice(0, block.indexOf("</li>"));
+    const anchor = /<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(chunk);
+    if (!anchor) continue;
+    const url = unwrapBingHref(anchor[1]!);
+    const title = stripHtml(anchor[2] ?? "");
+    if (!/^https?:\/\//.test(url) || !title) continue;
+    const paragraph = /<p[^>]*>([\s\S]*?)<\/p>/i.exec(chunk);
+    results.push({ title, url, snippet: paragraph ? stripHtml(paragraph[1] ?? "") : "" });
+    if (results.length >= MAX_SEARCH_RESULTS) break;
   }
-  return titles.slice(0, MAX_SEARCH_RESULTS).map((t, index) => ({ ...t, snippet: snippets[index] ?? "" }));
+  return results;
 }
 
 const webSearchTool = defineTool({
@@ -182,14 +190,11 @@ const webSearchTool = defineTool({
   execute: async (i, ctx) => {
     let res: Response;
     try {
-      res = await http.fetch("https://html.duckduckgo.com/html/", {
-        method: "POST",
+      res = await http.fetch(`https://www.bing.com/search?q=${encodeURIComponent(i.query)}&count=10`, {
         headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          // A descriptive agent UA: the endpoint serves plain HTML made for parsing.
-          "user-agent": "Mozilla/5.0 (compatible; Talorys personal assistant)",
+          // Bing serves a parseable no-JS page to plain browser UAs; a bare agent UA gets less complete results.
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
         },
-        body: new URLSearchParams({ q: i.query }).toString(),
         signal: requestSignal(ctx),
       });
     } catch (error) {
@@ -198,7 +203,7 @@ const webSearchTool = defineTool({
     }
     if (!res.ok) throw new ToolError(`Web search failed (HTTP ${res.status}) — the search engine may be rate-limiting. Try again later.`);
     const html = await readCapped(res, MAX_BODY_BYTES);
-    const results = parseDdgResults(html);
+    const results = parseBingResults(html);
     return {
       query: i.query,
       results,
