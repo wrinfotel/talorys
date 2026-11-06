@@ -248,4 +248,20 @@ describe("telegram service", () => {
       }
     });
   });
+
+  it("delivers notifications created through the repository alongside push", async () => {
+    await inAgent(async (agent) => {
+      const s = agent.services;
+      const api = happy();
+      s.telegram.fetcher = api.fetcher;
+      await s.telegram.connect(TOKEN, "https://me.pages.dev");
+      s.telegram.setPaired(100);
+      const n = s.notifications.create({ title: "Reminder", body: "**Call** the dentist", automation_id: null });
+      await s.telegram.idle();
+      const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
+      expect(sends).toHaveLength(1);
+      expect(sends[0]!.body).toEqual({ chat_id: 100, text: "Reminder\n\nCall the dentist" });
+      expect(n.id).toEqual(expect.any(String));
+    });
+  });
 });

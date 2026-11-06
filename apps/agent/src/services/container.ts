@@ -15,6 +15,8 @@ import { PushSubscriptionRepository } from "../push/repository";
 import { PushService } from "../push/service";
 import { RemoteTokenService } from "../remote/tokens";
 import { TaskPlanService } from "./task-plans";
+import { SecretBox } from "./secret-box";
+import { TelegramService } from "../telegram/service";
 import { McpService } from "../mcp/service";
 
 /** All data services for the single owner, bound to one Durable Object's storage. */
@@ -35,6 +37,9 @@ export interface Services {
   automations: AutomationService;
   memoryHistory: MemoryHistoryService;
   push: PushService;
+  telegram: TelegramService;
+  /** The Durable Object's waitUntil, for background work started outside a service (the Telegram webhook). */
+  background: (work: Promise<unknown>) => void;
   remote: RemoteTokenService;
   taskPlans: TaskPlanService;
   mcp: McpService;
@@ -55,7 +60,11 @@ export function createServices(
   });
   const automationsRepo = new AutomationRepository(db);
   const push = new PushService(new PushSubscriptionRepository(db), env, background);
-  const notifications = new NotificationRepository(db, (n) => push.notify(n));
+  const telegram = new TelegramService(settings, new SecretBox(env.MCP_CREDENTIAL_KEY, "telegram"), background);
+  const notifications = new NotificationRepository(db, (n) => {
+    push.notify(n);
+    telegram.notify(n);
+  });
   const activity = new ActivityLog(db);
   const memories = new MemoryRepository(db);
   const usage = new UsageService(db);
@@ -82,6 +91,8 @@ export function createServices(
     automations: new AutomationService(automationsRepo, settings, activity, scheduler),
     memoryHistory: new MemoryHistoryService(db, memories, settings, usage, activity, memoryHooks),
     push,
+    telegram,
+    background,
     remote: new RemoteTokenService(db, settings, env.SESSION_SECRET),
     taskPlans: new TaskPlanService(db, tasks, projects, activity),
     mcp: new McpService(db, env, activity),
