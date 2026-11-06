@@ -185,7 +185,7 @@ describe("telegram turn replies", () => {
       agent.services.telegram.setPaired(CHAT);
       const long = "x".repeat(6000);
       const events: ChatStreamEvent[] = [start("c1"), { type: "text", delta: long }];
-      await processUpdate({ services: agent.services, runner: () => fakeRunner(events), activeRuns: agent.activeRuns }, update("tell me everything"));
+      await processUpdate({ services: agent.services, runner: async () => fakeRunner(events), activeRuns: agent.activeRuns }, update("tell me everything"));
       const texts = replies(api);
       expect(texts.length).toBeGreaterThanOrEqual(2);
       for (const text of texts) expect(text.length).toBeLessThanOrEqual(4096);
@@ -197,7 +197,7 @@ describe("telegram turn replies", () => {
       const api = await connected(agent);
       agent.services.telegram.setPaired(CHAT);
       const events: ChatStreamEvent[] = [start("c1"), { type: "error", code: "AI_QUOTA_EXHAUSTED", message: "Daily AI quota reached." }];
-      await processUpdate({ services: agent.services, runner: () => fakeRunner(events), activeRuns: agent.activeRuns }, update("hello"));
+      await processUpdate({ services: agent.services, runner: async () => fakeRunner(events), activeRuns: agent.activeRuns }, update("hello"));
       expect(replies(api)).toEqual(["Daily AI quota reached."]);
     });
   });
@@ -210,7 +210,7 @@ describe("telegram turn replies", () => {
         start("c1"),
         { type: "done", message: { id: "a", conversation_id: "c1", role: "assistant", content: "", tools: [], status: "complete", error: null, created_at: "" } },
       ];
-      await processUpdate({ services: agent.services, runner: () => fakeRunner(events), activeRuns: agent.activeRuns }, update("hello"));
+      await processUpdate({ services: agent.services, runner: async () => fakeRunner(events), activeRuns: agent.activeRuns }, update("hello"));
       expect(replies(api)).toEqual(["The AI model could not respond. Try again in a moment."]);
     });
   });
@@ -228,7 +228,7 @@ describe("telegram turn replies", () => {
             while (!input.signal.aborted) await new Promise((r) => setTimeout(r, 10));
           })(),
       } as unknown as AgentRunner;
-      const pending = processUpdate({ services: agent.services, runner: () => runner, activeRuns: agent.activeRuns }, update("hello"));
+      const pending = processUpdate({ services: agent.services, runner: async () => runner, activeRuns: agent.activeRuns }, update("hello"));
       // The claim is visible to /api/chat/cancel as soon as the turn is registered.
       await new Promise((r) => setTimeout(r, 50));
       expect(agent.activeRuns.get("c1")).toBeInstanceOf(AbortController);
@@ -250,7 +250,7 @@ describe("telegram turn replies", () => {
             throw new Error("boom");
           })(),
       } as unknown as AgentRunner;
-      await expect(processUpdate({ services: agent.services, runner: () => runner, activeRuns: agent.activeRuns }, update("hello"))).resolves.toBeUndefined();
+      await expect(processUpdate({ services: agent.services, runner: async () => runner, activeRuns: agent.activeRuns }, update("hello"))).resolves.toBeUndefined();
       expect(replies(api)).toEqual(["Something went wrong."]);
     });
   });

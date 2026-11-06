@@ -15,7 +15,8 @@ export interface TelegramUpdate {
 /** Everything the handler needs from the agent; a real TalorysAgent satisfies it directly. */
 export interface UpdateHandlerDeps {
   services: Services;
-  runner: () => AgentRunner;
+  /** Async since the custom-provider work: the agent resolves its AI provider per turn. */
+  runner: () => Promise<AgentRunner>;
   /** In-flight chat turns keyed by conversation id, as in the web chat routes. */
   activeRuns: Map<string, AbortController>;
 }
@@ -99,7 +100,7 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
     let reply = "";
     let errorReply: string | null = null;
     try {
-      for await (const event of deps.runner().chat({ conversationId, message: text, signal: controller.signal })) {
+      for await (const event of (await deps.runner()).chat({ conversationId, message: text, signal: controller.signal })) {
         if (event.type === "start") {
           // The web routes move their claim to the new conversation id; so do we, and remember it.
           conversationId = event.conversation_id;
