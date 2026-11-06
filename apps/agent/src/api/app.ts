@@ -15,6 +15,7 @@ import { pushRoutes } from "../push/routes";
 import { remoteAuth } from "../remote/middleware";
 import { remoteRoutes } from "../remote/routes";
 import { mcpRoutes } from "../mcp/routes";
+import { telegramRoutes, telegramWebhookAuth } from "../telegram/routes";
 
 export interface AppEnv {
   Bindings: { agent: TalorysAgent; env: Env };
@@ -22,6 +23,8 @@ export interface AppEnv {
     sessionId: string | null;
     /** The validated access token behind a Bearer request; null for cookie and anonymous requests. */
     remote: { id: string; name: string; scope: RemoteScope } | null;
+    /** Set only by telegramWebhookAuth after the webhook secret matched; skips CSRF and session for the webhook. */
+    telegram: { chatContext: true } | null;
   };
 }
 
@@ -36,6 +39,8 @@ export function createApi() {
   app.notFound(() => errorResponse(new NotFoundError("Unknown API route")));
 
   app.use("*", securityHeaders);
+  // Before CSRF and session: Telegram sends neither a session nor our CSRF header, only its webhook secret.
+  app.use("/telegram/webhook", telegramWebhookAuth);
   // Before CSRF and session: a validated token skips both, a bad one fails closed.
   app.use("*", remoteAuth);
   app.use("*", csrfProtection);
@@ -52,6 +57,7 @@ export function createApi() {
   app.route("/", pushRoutes);
   app.route("/", remoteRoutes);
   app.route("/", mcpRoutes);
+  app.route("/", telegramRoutes);
 
   return app;
 }

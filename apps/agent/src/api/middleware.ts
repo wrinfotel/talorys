@@ -37,6 +37,8 @@ function allowedOrigins(c: Context<AppEnv>): Set<string> {
 export const csrfProtection: MiddlewareHandler<AppEnv> = async (c, next) => {
   // Set only after `remoteAuth` validated a token; a header alone never skips this check.
   if (c.get("remote")) return next();
+  // Set only after telegramWebhookAuth matched the webhook secret; a header alone never skips this.
+  if (c.get("telegram")) return next();
   if (SAFE_METHODS.has(c.req.method)) return next();
   if (c.req.header(CSRF_HEADER) !== "1") {
     throw new AppError("FORBIDDEN", "Missing CSRF header.");
@@ -88,6 +90,11 @@ export function sessionCookie(c: Context<AppEnv>, token: string, expires: Date |
 
 export const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (c.get("remote")) {
+    c.set("sessionId", null);
+    return next();
+  }
+  // The Telegram webhook has no session; its own secret check already ran.
+  if (c.get("telegram")) {
     c.set("sessionId", null);
     return next();
   }
