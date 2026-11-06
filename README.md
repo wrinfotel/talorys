@@ -1,38 +1,30 @@
-# Talorys
+# Talorys — personal fork
 
 **Your personal AI agent. Your own cloud.**
 
-Website: [rociiu.github.io/talorys](https://rociiu.github.io/talorys/)
+This is an extended fork of the open-source Talorys project:
+the same private, single-user AI assistant running entirely in **your own Cloudflare
+account** — plus three additions built on top:
+
+- **🤖 Custom AI providers** — bring your own model through any OpenAI-compatible API
+  (OpenRouter, OpenAI, Groq, a local Ollama) in **Settings → AI**: base URL, model, API
+  key, with a connectivity test. Cloudflare's free Workers AI stays the default and the
+  fallback until you configure one. See [docs/custom-ai-provider.md](docs/custom-ai-provider.md).
+- **✈️ Telegram bot** — chat with your agent in Telegram and receive reminders and
+  automation results in the same chat. Pair it with a one-time code; other chats are
+  ignored. See [docs/telegram-bot.md](docs/telegram-bot.md).
+- **🌐 Web access** — the agent reads public web pages (`web_fetch`) and searches the
+  web (`web_search`), in chat and in Telegram. Read-only, no logins; search quality
+  upgrades with a free [Tavily](https://app.tavily.com) key (**Settings → Integrations**),
+  with an automatic built-in fallback.
 
 > 🆕 **New here?** A step-by-step setup guide for non-technical users — installation, your
 > own model (OpenRouter), the Telegram bot and better web search:
 > [**docs/quick-start.md**](docs/quick-start.md) 🇬🇧 · [**docs/quick-start-ru.md**](docs/quick-start-ru.md) 🇷🇺
 > No server magic required: just a free Cloudflare account and 30 minutes.
 
-This fork adds, on top of upstream Talorys:
-
-- **Custom AI providers** — bring your own OpenAI-compatible model (OpenRouter, OpenAI, Groq, Ollama) in Settings → AI; Workers AI stays the default. See [docs/custom-ai-provider.md](docs/custom-ai-provider.md).
-- **Telegram bot** — chat with your agent and receive reminders in Telegram. See [docs/telegram-bot.md](docs/telegram-bot.md).
-- **Web access** — the agent reads public pages and searches the web (`web_fetch` / `web_search`), optionally via a free Tavily key (Settings → Integrations).
-
-Talorys is a free, open-source personal AI assistant that runs entirely inside
-**your own Cloudflare account**. It chats with you, remembers what matters,
-manages tasks, notes and projects, and runs reminders and routines on a
-schedule — without any server, database or account operated by the Talorys
-developers.
-
-One person. One Cloudflare account. One command. One personal AI agent.
-
-```bash
-npx create-talorys@latest
-```
-
-Or install it with [Appflare](https://appflare.dev), which deploys it as a
-[single Worker](docs/deployment.md#one-worker-without-pages):
-
-[![Install with Appflare](https://appflare.dev/badge.svg)](https://appflare.dev/install/talorys/)
-
----
+Everything below describes the underlying Talorys — it all applies here unchanged,
+including the feature list, architecture and privacy model.
 
 ## 1. What Talorys is
 
@@ -46,9 +38,6 @@ Or install it with [Appflare](https://appflare.dev), which deploys it as a
 - **Push notifications** — reminders, digests and routines also arrive as system notifications on the phones and computers you turn them on for, even when Talorys is closed (Settings → General). Uses standard Web Push, encrypted end to end; on iPhone and iPad, add Talorys to the Home Screen first.
 - **Chat alerts** — a system notification when a reply finishes or needs your approval while you're in another window (Settings → General, per device). Talorys must stay open, since closing it stops the reply.
 - **Remote MCP servers (optional)** — connect remote [MCP](https://modelcontextprotocol.io) servers in Settings → Integrations (no auth, a bearer token, or OAuth sign-in) and choose which of their tools Talorys may use. Tools start off, and calls that may change something wait for your approval. Not used by scheduled routines. See [docs/mcp.md](docs/mcp.md).
-- **Web access** — the agent can read public web pages by URL and search the web with its built-in `web_fetch` and `web_search` tools, in chat and in Telegram. Read-only and login-free by design; an optional free Tavily key (Settings → Integrations) upgrades the search quality.
-- **Custom AI providers (optional)** — instead of (or alongside) Workers AI, point Talorys at any OpenAI-compatible API — OpenRouter, OpenAI, Groq, a local Ollama — with your own base URL, model and API key (Settings → AI). Workers AI stays the default until you configure one. See [docs/custom-ai-provider.md](docs/custom-ai-provider.md).
-- **Telegram bot (optional)** — chat with your agent in Telegram and get reminders and automation results in the same chat. Connect a @BotFather token in Settings → Integrations and pair your chat with a one-time `/start <code>`; other chats are ignored. See [docs/telegram-bot.md](docs/telegram-bot.md).
 - **Single-user by design** — no signup, no accounts, no teams. The installer sets the owner password.
 - **Works without AI** — tasks, notes, memories and reminders keep working if Workers AI is unavailable or your free quota is used up.
 
@@ -74,7 +63,9 @@ Browser ──HTTPS──▶ Cloudflare Pages (React app + /api Pages Function)
                    TalorysAgent — Cloudflare Agents SDK Durable Object
                      ├─ SQLite: conversations, memories, tasks, notes, projects,
                      │          automations, sessions, settings, usage
-                     ├─ Workers AI: @cf/zai-org/glm-4.7-flash (streaming + tool calling)
+                     ├─ AI model: Workers AI by default, or your own
+                     │    OpenAI-compatible provider (Settings → AI)
+                     ├─ Telegram: webhook from the paired chat + notification delivery
                      └─ Alarms: reminders and recurring schedules
 ```
 
@@ -101,8 +92,15 @@ paid service.
 
 ## 4. Deploy
 
+Clone **this fork** (the `npx create-talorys@latest` one-liner installs the upstream
+version without the fork additions — see [Upstream project](#upstream-project)):
+
 ```bash
-npx create-talorys@latest
+git clone https://github.com/wrinfotel/talorys.git
+cd talorys
+npm install
+npm run build
+node packages/create-talorys/dist/cli.js install
 ```
 
 The installer:
@@ -124,7 +122,7 @@ Keep it for updates.
 what already exists: no duplicate resources, no password re-prompt if the
 password is already configured, and **no data is ever deleted**.
 
-Non-interactive installs: `TALORYS_OWNER_PASSWORD=... npx create-talorys@latest --yes --account-id <id>`
+Non-interactive installs: `TALORYS_OWNER_PASSWORD=... node packages/create-talorys/dist/cli.js install --yes --account-id <id>`
 (with `CLOUDFLARE_API_TOKEN` set if you are not logged in).
 
 ### Permissions
@@ -146,10 +144,10 @@ Open the URL the installer prints, enter your owner password, and start chatting
 Sign in from any number of devices — they are all the same owner. Manage
 sessions under **Settings → Security**.
 
-Forgot the password? From your `talorys/` directory:
+Forgot the password? From the cloned `talorys/` directory:
 
 ```bash
-npx create-talorys@latest reset-password
+node packages/create-talorys/dist/cli.js reset-password --dir "<your install folder>"
 ```
 
 This replaces the password secret and signs out every device.
@@ -168,6 +166,12 @@ If you connect a remote MCP server, calling one of its tools sends that call's
 arguments to the server, outside your Cloudflare account. Nothing is sent to an
 MCP server unless you connected it and turned the tool on. See
 [docs/mcp.md](docs/mcp.md#privacy).
+
+The built-in web tools (`web_fetch`, `web_search`) talk to the public web by
+design: a search sends only the search query to the search engine (Tavily if you
+configured a key, otherwise Bing), and a page read fetches exactly the URL the
+assistant chose. Memories, notes and conversation content are never attached to
+these calls.
 
 Security model and threat mitigations: [docs/security.md](docs/security.md).
 
@@ -213,7 +217,7 @@ usage and billing.
 Requirements: Node.js 22+.
 
 ```bash
-git clone https://github.com/rociiu/talorys.git
+git clone https://github.com/wrinfotel/talorys.git
 cd talorys
 npm install
 npm run dev
@@ -246,16 +250,21 @@ import result lists any it skipped).
 
 ## 10. Update
 
-From your `talorys/` directory:
+Pull the latest fork code, rebuild and redeploy to the **same** resources:
 
 ```bash
-npx create-talorys@latest update
+git pull
+npm install
+npm run build
+node packages/create-talorys/dist/cli.js update --dir "<your install folder>"
 ```
 
-This redeploys the latest Worker and frontend to the **same** resources. The
-Durable Object namespace is never recreated (migrations are append-only), the
+The Durable Object namespace is never recreated (migrations are append-only), the
 owner password and sessions are kept, and schema migrations run automatically
 and transactionally on first request. Also available: `status` and `doctor`.
+
+> 💡 After an update, give the assistant a minute or two: a warm Durable Object
+> can serve the previous version for a short while before picking up new code.
 
 ## 11. Troubleshooting
 
@@ -266,9 +275,23 @@ and transactionally on first request. Also available: `status` and `doctor`.
 | Permission errors | Use an account where you can edit Workers and Pages, or a token with the permissions above. |
 | Chat says the AI allocation is used up | Wait for the daily reset; or enable Demo mode in Settings → AI. |
 | Locked out after failed logins | Wait 15 minutes, or reset the password with the CLI. |
+| A new setting or feature is missing after an update | Wait 1–2 minutes (a warm backend can serve the previous version briefly), then reload the page. |
 
-`npx create-talorys@latest doctor` checks everything automatically. More in
-[docs/troubleshooting.md](docs/troubleshooting.md).
+`node packages/create-talorys/dist/cli.js doctor --dir "<your install folder>"` checks
+everything automatically. More in [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## Upstream project
+
+This fork is based on Talorys by Roc Yu. The original project — its website,
+one-command installer and Appflare deployment — lives upstream; those channels
+install the **original** version without this fork's additions:
+
+- Website: [rociiu.github.io/talorys](https://rociiu.github.io/talorys/)
+- Upstream repository: [github.com/rociiu/talorys](https://github.com/rociiu/talorys)
+- Upstream installer: `npx create-talorys@latest`
+- Or install it with [Appflare](https://appflare.dev), which deploys it as a
+  [single Worker](docs/deployment.md#one-worker-without-pages):
+  [![Install with Appflare](https://appflare.dev/badge.svg)](https://appflare.dev/install/talorys/)
 
 ## Repository layout
 
