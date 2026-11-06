@@ -6,12 +6,14 @@ import { memoryTools } from "./memories";
 import { reminderTools } from "./reminders";
 import { searchTools } from "./search";
 import { planTools } from "./plans";
+import { webTools } from "./web";
 
 /**
  * Every tool available to the agent. To add a capability, create a module with
  * `defineTool(...)` entries and add it here. Tools may only touch the owner's
- * own data through the service layer: no shell, code execution, credentials or
- * arbitrary network access.
+ * own data through the service layer: no shell, code execution or credentials.
+ * The built-in web tools are the one network exception: read-only, public
+ * http(s) URLs only, no logins.
  */
 export const ALL_TOOLS: ToolDefinition[] = [
   ...taskTools,
@@ -21,6 +23,7 @@ export const ALL_TOOLS: ToolDefinition[] = [
   ...memoryTools,
   ...reminderTools,
   ...searchTools,
+  ...webTools,
 ] as ToolDefinition[];
 
 const names = new Set<string>();
