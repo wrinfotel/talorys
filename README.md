@@ -4,9 +4,10 @@
 
 Website: [rociiu.github.io/talorys](https://rociiu.github.io/talorys/)
 
-> 🇷🇺 **Новичок здесь?** Пошаговая инструкция на русском — установка, своя модель (OpenRouter),
-> Telegram-бот и улучшенный поиск: [**docs/quick-start-ru.md**](docs/quick-start-ru.md).
-> Никакой серверной магии: нужны только бесплатный аккаунт Cloudflare и 30 минут.
+> 🆕 **New here?** A step-by-step setup guide for non-technical users — installation, your
+> own model (OpenRouter), the Telegram bot and better web search:
+> [**docs/quick-start.md**](docs/quick-start.md) 🇬🇧 · [**docs/quick-start-ru.md**](docs/quick-start-ru.md) 🇷🇺
+> No server magic required: just a free Cloudflare account and 30 minutes.
 
 This fork adds, on top of upstream Talorys:
 
