@@ -4,7 +4,7 @@ import type { AppEnv } from "../app";
 import { body } from "../middleware";
 
 /** Owner-only status and key management for the web_search tool's optional Tavily backend. */
-export const webSearchRoutes = new Hono<AppEnv>().basePath("/api");
+export const webSearchRoutes = new Hono<AppEnv>();
 
 webSearchRoutes.get("/web-search", async (c) => {
   const key = await c.env.agent.services.webSearch.apiKey();
