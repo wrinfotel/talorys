@@ -83,7 +83,7 @@ describe("ai-provider routes", () => {
       try {
         const res = await c.call("/api/ai-provider", { method: "PUT", body: { base_url: BASE_URL, model: MODEL, api_key: API_KEY } });
         expect(res.status).toBe(503);
-        expect(await res.json()).toMatchObject({ error: { code: "NOT_CONFIGURED", message: expect.stringContaining("create-talorys") } });
+        expect(await res.json()).toMatchObject({ error: { code: "NOT_CONFIGURED", message: expect.stringContaining("installer update") } });
       } finally {
         env.MCP_CREDENTIAL_KEY = saved;
       }

@@ -120,7 +120,7 @@ retried once, only when a reused session turned out to be stale.
 
 | Name | Kind | Purpose |
 | --- | --- | --- |
-| `MCP_CREDENTIAL_KEY` | Secret | Encrypts bearer tokens and OAuth sign-ins. The installer creates it, and `npx create-talorys@latest update` adds it to older installations. Without it you can still add servers that need no authentication. Changing it makes stored tokens unreadable; enter them again or sign in again. |
+| `MCP_CREDENTIAL_KEY` | Secret | Encrypts bearer tokens and OAuth sign-ins. The installer creates it, and the installer's `update` command adds it to older installations. Without it you can still add servers that need no authentication. Changing it makes stored tokens unreadable; enter them again or sign in again. |
 | `TALORYS_MCP` | Secret or var | `off` turns MCP servers off for the deployment. |
 | `TALORYS_MCP_MAX_TOOLS` | Secret or var | Most tools on at once (default 20, at most 64). |
 
@@ -155,7 +155,7 @@ usual, and large tool descriptions make every request in a turn longer.
 | This address is on a private or local network | Talorys only connects to public servers. To test a local server, use local development (below). |
 | The server did not return any compatible tools | Its tools have input schemas Talorys can't validate. Each one shows the reason. |
 | Changed, review again | The server changed the tool. Read its description, then turn it on again. |
-| Credential storage isn't set up | Run `npx create-talorys@latest update`, or set `MCP_CREDENTIAL_KEY` by hand. |
+| Credential storage isn't set up | Run the installer's `update` command, or set `MCP_CREDENTIAL_KEY` by hand. |
 | Sign in to finish connecting | Choose **Sign in** and approve access on the server's page. The link is valid for 10 minutes; choose reconnect for a new one. |
 | Signing in to this server failed | The server's sign-in doesn't support dynamic client registration, or refused the request. Try a bearer token if it offers one. |
 | This sign-in link expired or was already used | Start again with reconnect. Each sign-in link works once. |

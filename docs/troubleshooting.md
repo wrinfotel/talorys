@@ -3,7 +3,7 @@
 Start with:
 
 ```bash
-npx create-talorys@latest doctor
+node packages/create-talorys/dist/cli.js doctor --dir "<install folder>"
 ```
 
 ## Installation
@@ -38,7 +38,7 @@ Cloudflare dashboard (Workers AI).
 guardrail; raise it in Settings → AI.
 
 **"Too many failed attempts."** Wait 15 minutes, or reset the password with
-`npx create-talorys@latest reset-password`.
+the installer's `reset-password` command (`node packages/create-talorys/dist/cli.js reset-password --dir "<install folder>"`).
 
 **Reminders fire at the wrong time.** Check Settings → General → Timezone.
 Changing it re-schedules all automations.

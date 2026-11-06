@@ -23,7 +23,7 @@ export class McpCredentials {
 
   assertAvailable(): void {
     if (!this.available) {
-      throw new AppError("NOT_CONFIGURED", "Credential storage isn't set up on this deployment. Run `npx create-talorys update` to add the MCP_CREDENTIAL_KEY secret.");
+      throw new AppError("NOT_CONFIGURED", "Credential storage isn't set up on this deployment. Re-run the Talorys installer update (its `update` command) to add the MCP_CREDENTIAL_KEY secret.");
     }
   }
 

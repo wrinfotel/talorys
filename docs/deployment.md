@@ -1,9 +1,26 @@
 # Deployment
 
+> **This fork.** The installer here runs from the cloned repository, not from npm —
+> the `npx create-talorys@latest` one-liner installs the **upstream** version without
+> this fork's additions (custom AI providers, Telegram bot, web access):
+>
+> ```bash
+> git clone https://github.com/wrinfotel/talorys.git
+> cd talorys
+> npm install
+> npm run build
+> node packages/create-talorys/dist/cli.js install
+> ```
+>
+> Everything below applies unchanged; wherever the upstream commands say
+> `npx create-talorys@latest <command>`, run
+> `node packages/create-talorys/dist/cli.js <command> --dir "<install folder>"` instead.
+
 ## One command
 
 ```bash
-npx create-talorys@latest
+npx create-talorys@latest          # upstream install
+node packages/create-talorys/dist/cli.js install    # this fork (from the cloned repo)
 ```
 
 ### Steps the installer performs
@@ -89,7 +106,7 @@ another one.
 ## Push notifications
 
 Web Push needs a VAPID key pair stored as two Worker secrets. The installer
-creates them on a fresh install, and `npx create-talorys@latest update` adds
+creates them on a fresh install, and the installer's `update` command adds
 them to an installation made before push existed. Existing keys are never
 replaced, because new keys would disconnect every subscribed device.
 
@@ -120,7 +137,7 @@ a plain variable would be dropped when an update regenerates the Worker config.
 
 ## Updates
 
-`npx create-talorys@latest update` refreshes artifacts, keeps the same names
+The installer's `update` command (`node packages/create-talorys/dist/cli.js update --dir "<install folder>"`) refreshes artifacts, keeps the same names
 and Durable Object class, appends (never edits) migrations, keeps secrets, and
 re-verifies. Schema migrations run transactionally inside the Durable Object.
 
