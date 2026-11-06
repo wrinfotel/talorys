@@ -28,13 +28,14 @@ You don't need to buy or rent a server. Everything runs on Cloudflare's free tie
    - go to [nodejs.org](https://nodejs.org),
    - download the version marked **LTS** (recommended),
    - install it like any normal program: next, next, done.
+   - Talorys needs Node **22 or newer** — the check below will tell you if something is off.
 4. **Install Git** (the program that downloads code):
    - go to [git-scm.com/downloads](https://git-scm.com/downloads),
    - download for your system and install (all the default choices are fine).
 
 Check that everything worked: press **Win+R**, type `cmd`, press Enter. In the black
 window type `node -v` and Enter — you should see a version (like `v22.14.0`). Then
-type `git --version` — another version. If both commands print versions, you're ready.
+type `git --version` — another version. If both commands print versions, you're ready. If `node -v` errors or shows a version below 22, reinstall Node.js (the LTS from nodejs.org) and reopen the window.
 
 ---
 
@@ -63,6 +64,7 @@ type `git --version` — another version. If both commands print versions, you'r
    ```
    node packages\create-talorys\dist\cli.js install
    ```
+   (on macOS and Linux use forward slashes: `packages/create-talorys/dist/cli.js`)
 7. The installer asks a few questions and signs you in to Cloudflare:
    - **Login to Cloudflare** — a browser window opens; sign in to your Cloudflare
      account and click **Allow**. This is a one-time authorization.
@@ -192,6 +194,12 @@ programs — that's by design.
 
 **The Telegram bot is silent.** Make sure you're messaging your own bot, the chat is
 paired (the `/start CODE` step), and that a minute or two has passed since the last update.
+
+**The assistant stops answering in the evening and mentions a daily budget.** That's
+the daily compute allowance of Cloudflare's free model (10,000 "neurons" a day,
+reset at 00:00 UTC). You can see the spend under **Settings → AI**. Either wait for
+the next day or connect your own model (Step 2) — e.g. a free or cheap one via
+OpenRouter.
 
 **What does it cost?** Cloudflare's free tier covers personal use. OpenRouter and Tavily
 have free quotas; paid models only if you top up your own balance.
