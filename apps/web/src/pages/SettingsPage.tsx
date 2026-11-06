@@ -10,6 +10,7 @@ import { PushNotificationsCard } from "../components/PushNotificationsCard";
 import { RemoteAccessCard } from "../components/RemoteAccessCard";
 import { McpServersCard } from "../components/McpServersCard";
 import { TelegramCard } from "../components/TelegramCard";
+import { WebSearchCard } from "../components/WebSearchCard";
 import { UsageBreakdown, UsagePricingNote } from "../components/UsageBreakdown";
 import { keys, useAiProvider, useApiMutation, useSessions, useSettings, useSystemInfo, useUpdateStatus, useUsage } from "../hooks/queries";
 import { useSession } from "../hooks/session";
@@ -85,6 +86,7 @@ export default function SettingsPage() {
           {tab === "Privacy" && <PrivacyTab />}
           {tab === "Security" && <SecurityTab />}
           {tab === "Integrations" && <McpServersCard />}
+          {tab === "Integrations" && <WebSearchCard />}
           {tab === "Integrations" && <TelegramCard />}
           {tab === "About" && <AboutTab settings={settings} />}
         </div>

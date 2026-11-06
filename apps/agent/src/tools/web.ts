@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineTool, ToolError } from "./registry";
+import { defineTool, ToolError, type ToolContext } from "./registry";
 
 /** Injectable for tests; production uses the Workers global fetch. */
 export const http = {
@@ -141,11 +141,46 @@ interface WebResult {
   snippet: string;
 }
 
+const NO_RESULTS_NOTE = "No results — the search engine may be rate-limiting. Try a different query or use web_fetch on a known URL.";
+
+/** Tavily (when the owner configured a key) returns clean JSON built for agents. */
+async function tavilySearch(query: string, apiKey: string, ctx: ToolContext): Promise<WebResult[]> {
+  const res = await http.fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey, query, max_results: MAX_SEARCH_RESULTS, search_depth: "basic" }),
+    signal: requestSignal(ctx),
+  });
+  if (!res.ok) {
+    const detail = (await res.text()).toLowerCase();
+    throw new ToolError(
+      `Tavily failed (HTTP ${res.status})${detail.includes("invalid") || detail.includes("unauthorized") ? " — the API key was rejected; update it in Settings → Integrations" : ""}.`,
+    );
+  }
+  const json = (await res.json()) as { results?: { title?: string; url?: string; content?: string }[] };
+  return (json.results ?? [])
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map((r) => ({ title: (r.title ?? "").trim(), url: (r.url ?? "").trim(), snippet: (r.content ?? "").trim().slice(0, 300) }))
+    .filter((r) => /^https?:\/\//.test(r.url) && r.title);
+}
+
+/** The built-in fallback: Bing's plain HTML results (Workers egress can't reach DuckDuckGo — it sits behind Cloudflare). */
+async function bingSearch(query: string, ctx: ToolContext): Promise<WebResult[]> {
+  const res = await http.fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=10`, {
+    headers: {
+      // Bing serves a parseable no-JS page to plain browser UAs; a bare agent UA gets less complete results.
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    },
+    signal: requestSignal(ctx),
+  });
+  if (!res.ok) throw new ToolError(`Web search failed (HTTP ${res.status}) — the search engine may be rate-limiting. Try again later.`);
+  const html = await readCapped(res, MAX_BODY_BYTES);
+  return parseBingResults(html);
+}
+
 /**
  * Bing wraps result links in `/ck/a` redirects whose `u` parameter is "a1" followed by
- * the base64url-encoded target. Workers egress can't reach DuckDuckGo (it sits behind
- * Cloudflare, which answers edge-to-edge fetches with error 1042), so Bing's plain HTML
- * results are the no-key backend.
+ * the base64url-encoded target page.
  */
 function unwrapBingHref(href: string): string {
   const trimmed = href.trim();
@@ -188,27 +223,26 @@ const webSearchTool = defineTool({
   input: z.object({ query: z.string().min(1).max(400) }),
   label: (i) => `Web search “${i.query.trim().slice(0, 60)}”`,
   execute: async (i, ctx) => {
-    let res: Response;
-    try {
-      res = await http.fetch(`https://www.bing.com/search?q=${encodeURIComponent(i.query)}&count=10`, {
-        headers: {
-          // Bing serves a parseable no-JS page to plain browser UAs; a bare agent UA gets less complete results.
-          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-        },
-        signal: requestSignal(ctx),
-      });
-    } catch (error) {
-      if (ctx.signal?.aborted) throw error;
-      throw new ToolError(`Web search failed: ${error instanceof Error ? error.message : "request failed"}.`);
+    // Tavily when the owner configured a key; every Tavily failure falls back to the built-in
+    // Bing results, so the owner still gets an answer instead of a dead end.
+    const apiKey = await ctx.services.webSearch.apiKey();
+    if (apiKey) {
+      try {
+        const results = await tavilySearch(i.query, apiKey, ctx);
+        return { provider: "tavily" as const, query: i.query, results, ...(results.length === 0 ? { note: NO_RESULTS_NOTE } : {}) };
+      } catch (error) {
+        if (ctx.signal?.aborted) throw error;
+        const results = await bingSearch(i.query, ctx);
+        return {
+          provider: "bing" as const,
+          query: i.query,
+          results,
+          note: `Tavily failed (${error instanceof Error ? error.message : "error"}); used the built-in fallback search.`,
+        };
+      }
     }
-    if (!res.ok) throw new ToolError(`Web search failed (HTTP ${res.status}) — the search engine may be rate-limiting. Try again later.`);
-    const html = await readCapped(res, MAX_BODY_BYTES);
-    const results = parseBingResults(html);
-    return {
-      query: i.query,
-      results,
-      ...(results.length === 0 ? { note: "No results — the search engine may be rate-limiting. Try a different query or use web_fetch on a known URL." } : {}),
-    };
+    const results = await bingSearch(i.query, ctx);
+    return { provider: "bing" as const, query: i.query, results, ...(results.length === 0 ? { note: NO_RESULTS_NOTE } : {}) };
   },
 });
 

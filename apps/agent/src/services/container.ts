@@ -18,6 +18,7 @@ import { TaskPlanService } from "./task-plans";
 import { SecretBox } from "./secret-box";
 import { TelegramService } from "../telegram/service";
 import { McpService } from "../mcp/service";
+import { WebSearchService } from "./web-search";
 
 /** All data services for the single owner, bound to one Durable Object's storage. */
 export interface Services {
@@ -43,6 +44,7 @@ export interface Services {
   remote: RemoteTokenService;
   taskPlans: TaskPlanService;
   mcp: McpService;
+  webSearch: WebSearchService;
 }
 
 /** `background` keeps work alive after the request or alarm that started it (the Durable Object's waitUntil). */
@@ -96,5 +98,6 @@ export function createServices(
     remote: new RemoteTokenService(db, settings, env.SESSION_SECRET),
     taskPlans: new TaskPlanService(db, tasks, projects, activity),
     mcp: new McpService(db, env, activity),
+    webSearch: new WebSearchService(settings, new SecretBox(env.MCP_CREDENTIAL_KEY, "web-search")),
   };
 }

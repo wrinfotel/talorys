@@ -521,3 +521,15 @@ export interface UsageCounters {
   unpriced_calls: number;
   mock_calls: number;
 }
+
+// ---------- Web search (optional Tavily key) ----------
+
+export const webSearchKeySchema = z.object({
+  api_key: z.string().trim().min(16).max(200),
+});
+
+export const webSearchStatusSchema = z.object({
+  provider: z.enum(["tavily", "bing"]),
+  has_api_key: z.boolean(),
+});
+export type WebSearchStatus = z.infer<typeof webSearchStatusSchema>;

@@ -16,6 +16,7 @@ import { remoteAuth } from "../remote/middleware";
 import { remoteRoutes } from "../remote/routes";
 import { mcpRoutes } from "../mcp/routes";
 import { telegramRoutes, telegramWebhookAuth } from "../telegram/routes";
+import { webSearchRoutes } from "./routes/web-search";
 
 export interface AppEnv {
   Bindings: { agent: TalorysAgent; env: Env };
@@ -58,6 +59,7 @@ export function createApi() {
   app.route("/", remoteRoutes);
   app.route("/", mcpRoutes);
   app.route("/", telegramRoutes);
+  app.route("/", webSearchRoutes);
 
   return app;
 }

@@ -1,15 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 import { ALL_TOOLS } from "../src/tools";
 import { http, webTools } from "../src/tools/web";
-import type { ImmediateTool } from "../src/tools/registry";
+import type { ImmediateTool, ToolContext } from "../src/tools/registry";
 
-const ctx = { services: {} as never, timezone: "UTC", mode: "chat" as const };
+const ctx = {
+  services: { webSearch: { apiKey: async () => null } },
+  timezone: "UTC",
+  mode: "chat" as const,
+} as unknown as ToolContext;
+/** A context whose owner has a Tavily key configured. */
+const tavilyCtx = {
+  services: { webSearch: { apiKey: async () => "tvly-test-key-0000000000" } },
+  timezone: "UTC",
+  mode: "chat" as const,
+} as unknown as ToolContext;
 const webFetch = webTools[0] as ImmediateTool;
 const webSearch = webTools[1] as ImmediateTool;
 
 /** Runs a tool and returns its result; `execute` lives only on immediate tools, which both of these are. */
-function run(tool: unknown, input: unknown): Promise<unknown> {
-  return Promise.resolve((tool as ImmediateTool).execute(input, ctx));
+function run(tool: unknown, input: unknown, context = ctx): Promise<unknown> {
+  return Promise.resolve((tool as ImmediateTool).execute(input, context));
 }
 
 function page(title: string, body: string): string {
@@ -111,5 +121,30 @@ describe("web_search", () => {
   it("maps HTTP blocks to a tool error", async () => {
     http.fetch = vi.fn().mockResolvedValue(new Response("", { status: 403 })) as unknown as typeof fetch;
     await expect(webSearch.execute({ query: "test" }, ctx)).rejects.toThrow("HTTP 403");
+  });
+
+  it("uses Tavily when a key is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ results: [{ title: "Tavily result", url: "https://example.com/t", content: "Clean agent content" }] }), { status: 200 }),
+    );
+    http.fetch = fetchMock as unknown as typeof fetch;
+    const result = (await run(webSearch, { query: "test query" }, tavilyCtx)) as { provider: string; results: { title: string; url: string; snippet: string }[] };
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe("https://api.tavily.com/search");
+    expect(JSON.parse(init!.body as string)).toMatchObject({ api_key: "tvly-test-key-0000000000", query: "test query" });
+    expect(result.provider).toBe("tavily");
+    expect(result.results[0]).toEqual({ title: "Tavily result", url: "https://example.com/t", snippet: "Clean agent content" });
+  });
+
+  it("falls back to Bing when Tavily rejects the key", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Unauthorized: invalid API key", { status: 401 }))
+      .mockResolvedValueOnce(okResponse(bingHtml));
+    http.fetch = fetchMock as unknown as typeof fetch;
+    const result = (await run(webSearch, { query: "test query" }, tavilyCtx)) as { provider: string; note?: string; results: unknown[] };
+    expect(result.provider).toBe("bing");
+    expect(result.note).toContain("Tavily failed");
+    expect(result.results).toHaveLength(2);
   });
 });
