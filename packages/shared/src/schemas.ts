@@ -327,6 +327,53 @@ export type MemoryHistorySettings = z.infer<typeof memoryHistorySettingsSchema>;
 /** UI language. "system" follows the browser and falls back to English. */
 export const languagePreferenceSchema = z.enum(["system", ...LANGUAGES]);
 
+// ---------- Custom AI provider (feature A) ----------
+
+/** Custom OpenAI-compatible provider stored in settings. Absent = Cloudflare Workers AI (the default). */
+export const customProviderSchema = z.object({
+  baseUrl: z.string().trim().url().max(500),
+  model: z.string().trim().min(1).max(200),
+});
+export type CustomProvider = z.infer<typeof customProviderSchema>;
+
+export const aiProviderUpdateSchema = z.object({
+  base_url: z.string().trim().url().max(500),
+  model: z.string().trim().min(1).max(200),
+  /** Required when no key is stored yet; optional when only base_url/model change. */
+  api_key: z.string().min(1).max(500).optional(),
+});
+export type AiProviderUpdate = z.infer<typeof aiProviderUpdateSchema>;
+
+/** Test a provider config before saving; any field may come from the unsaved form. */
+export const aiProviderTestSchema = aiProviderUpdateSchema.partial();
+export type AiProviderTest = z.infer<typeof aiProviderTestSchema>;
+
+export const aiProviderStatusSchema = z.object({
+  kind: z.enum(["workers-ai", "custom"]),
+  base_url: z.string().nullable(),
+  model: z.string().nullable(),
+  has_api_key: z.boolean(),
+});
+export type AiProviderStatus = z.infer<typeof aiProviderStatusSchema>;
+
+// ---------- Telegram (feature B) ----------
+
+export const telegramConnectSchema = z.object({
+  token: z.string().trim().regex(/^\d{6,}:[\w-]{30,}$/, "Must be a Telegram bot token"),
+  webhook_base_url: z.string().trim().url().max(500),
+});
+export type TelegramConnect = z.infer<typeof telegramConnectSchema>;
+
+export const telegramStatusSchema = z.object({
+  connected: z.boolean(),
+  bot_username: z.string().nullable(),
+  paired: z.boolean(),
+  notify_enabled: z.boolean().nullable(),
+  webhook_base_url: z.string().nullable(),
+  pairing: z.object({ code: z.string(), expires_at: z.string() }).nullable(),
+});
+export type TelegramStatus = z.infer<typeof telegramStatusSchema>;
+
 export const settingsSchema = z.object({
   agentName: shortText(60),
   timezone: z.string().refine(isValidTimeZone, "Unknown IANA timezone"),
@@ -337,6 +384,8 @@ export const settingsSchema = z.object({
    */
   language: languagePreferenceSchema.catch("system"),
   model: z.string().regex(/^@(cf|hf)\/[\w.\-/]+$/, "Must be a Workers AI model id"),
+  /** Custom OpenAI-compatible provider. Absent = Cloudflare Workers AI (the default). */
+  aiProvider: customProviderSchema.optional(),
   temperature: z.number().min(0).max(1.5),
   limits: limitsSchema,
   autoMemory: z.boolean(),
@@ -355,6 +404,8 @@ export const settingsUpdateSchema = settingsSchema
     language: languagePreferenceSchema.optional(),
     limits: limitsSchema.partial().optional(),
     memoryHistory: memoryHistorySettingsSchema.partial().optional(),
+    // An explicit null removes the stored provider, returning to Workers AI.
+    aiProvider: customProviderSchema.nullable().optional(),
   });
 
 export const loginSchema = z.object({ password: z.string().min(1).max(256) });

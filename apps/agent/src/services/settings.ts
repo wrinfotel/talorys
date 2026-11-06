@@ -47,9 +47,13 @@ export class SettingsService {
     const parsedPatch = settingsUpdateSchema.safeParse(patch);
     if (!parsedPatch.success) throw ValidationError.fromZod(parsedPatch.error);
     const current = this.get();
+    // An explicit aiProvider: null resets to the default Workers AI provider: the stored value
+    // is dropped rather than merged, and the null itself never passes through stripUndefined.
+    const { aiProvider, ...rest } = parsedPatch.data;
     const next = {
       ...current,
-      ...stripUndefined(parsedPatch.data),
+      ...stripUndefined(rest),
+      ...(aiProvider === undefined ? {} : { aiProvider: aiProvider ?? undefined }),
       limits: { ...current.limits, ...stripUndefined(parsedPatch.data.limits ?? {}) },
       memoryHistory: { ...current.memoryHistory, ...stripUndefined(parsedPatch.data.memoryHistory ?? {}) },
     };
