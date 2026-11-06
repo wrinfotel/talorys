@@ -20,11 +20,11 @@ You don't need to buy or rent a server. Everything runs on Cloudflare's free tie
 
 ## Step 0. Get ready (10 minutes)
 
-1. **A modern browser** — any.
+1. **A browser**.
 2. **A Cloudflare account** (free). If you don't have one: go to
    [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up), click **Sign up**,
    enter your e-mail and a password. No credit card required.
-3. **Install Node.js** (the program that runs the Talorys installer):
+3. **Install Node.js**:
    - go to [nodejs.org](https://nodejs.org),
    - download the version marked **LTS** (recommended),
    - install it like any normal program: next, next, done.
