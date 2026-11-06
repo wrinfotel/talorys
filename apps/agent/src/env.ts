@@ -20,6 +20,8 @@ export interface Env {
   /**
    * Random secret that encrypts remote MCP server credentials at rest. Worker secret, set by the
    * installer. Without it, servers that need a bearer token can't be added; nothing else changes.
+   * The same secret also derives the SecretBox keys for the custom AI provider's API key and the
+   * Telegram bot token.
    */
   MCP_CREDENTIAL_KEY?: string;
   /** "off" turns remote MCP servers off for this deployment. */
