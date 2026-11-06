@@ -7,8 +7,10 @@ import type { Scheduler } from "./scheduling";
 import { AgentRunner } from "./runner";
 import { createApi } from "../api/app";
 import { CloudflareWorkersAIProvider } from "../ai/workers-ai";
+import { OpenAICompatibleProvider } from "../ai/openai-compatible";
 import { MockAIProvider } from "../ai/mock";
-import type { AIProvider } from "../ai/provider";
+import { UnavailableAiProvider, type AIProvider } from "../ai/provider";
+import { SecretBox } from "../services/secret-box";
 import { localDayBounds, formatLocal } from "../services/time";
 import { semanticExtensions } from "../semantic";
 import { AppError } from "../api/errors";
@@ -87,26 +89,55 @@ export class TalorysAgent extends Agent<Env, AgentState> {
     return Response.json({ error: { code: "NOT_FOUND", message: "Not found" } }, { status: 404 });
   }
 
-  /** Chooses the AI provider. The mock is only used in local development or explicit demo mode. */
-  aiProvider(): AIProvider | null {
+  /**
+   * Chooses the AI provider. The mock is only used in local development or explicit demo
+   * mode. A configured custom provider wins over Workers AI; when its stored key cannot
+   * be decrypted, the explicit `UnavailableAiProvider` fails the turn instead of silently
+   * falling back to Workers AI.
+   */
+  async aiProvider(): Promise<AIProvider | null> {
     const settings = this.services.settings.get();
     if (settings.demoMode) return new MockAIProvider();
     if (this.env.TALORYS_ENV === "development" && this.env.TALORYS_MOCK_AI === "1") return new MockAIProvider();
+    if (settings.aiProvider) {
+      const apiKey = await this.customProviderKey();
+      if (apiKey === null) return new UnavailableAiProvider();
+      return new OpenAICompatibleProvider({ baseUrl: settings.aiProvider.baseUrl, apiKey, model: settings.aiProvider.model });
+    }
     if (!this.env.AI) return null;
     return new CloudflareWorkersAIProvider(this.env.AI, settings.model);
   }
 
-  /** Clef for the memory-history AI check: only with real Workers AI (not mock AI or demo mode). */
+  /**
+   * Decrypts the stored custom provider API key (tal_settings "ai.credentials", SecretBox
+   * purpose "ai-provider"). Null when nothing is stored or the secret can't be read.
+   * Also used by the ai-provider routes; decryption is cheap, so nothing is cached.
+   */
+  async customProviderKey(): Promise<string | null> {
+    const stored = this.services.settings.getJson<{ credential: string }>("ai.credentials");
+    if (!stored?.credential) return null;
+    return new SecretBox(this.env.MCP_CREDENTIAL_KEY, "ai-provider").decrypt("key", stored.credential);
+  }
+
+  /**
+   * Clef for the memory-history AI check: only with real Workers AI (not mock AI, demo
+   * mode or the custom provider — the check keeps using Workers AI's decision model even
+   * when chat runs on another provider). Mirrors `aiProvider()`'s Workers AI branch
+   * synchronously, because the SecretBox decryption makes `aiProvider()` itself async.
+   */
   clefRun(): ClefRun | null {
-    if (!this.env.AI || !(this.aiProvider() instanceof CloudflareWorkersAIProvider)) return null;
+    if (!this.env.AI) return null;
+    const settings = this.services.settings.get();
+    if (settings.demoMode || settings.aiProvider) return null;
+    if (this.env.TALORYS_ENV === "development" && this.env.TALORYS_MOCK_AI === "1") return null;
     const ai = this.env.AI;
     return (request, signal) => ai.run(CLEF_MODEL, { ...request }, { signal });
   }
 
-  runner(): AgentRunner {
+  async runner(): Promise<AgentRunner> {
     return new AgentRunner(
       this.services,
-      this.aiProvider(),
+      await this.aiProvider(),
       semanticExtensions(this.services, this.env, (work) => this.ctx.waitUntil(work)),
       this.services.mcp.chatTools(),
     );
@@ -183,7 +214,7 @@ export class TalorysAgent extends Agent<Env, AgentState> {
         if (!s.usage.canRunScheduledAi(settings.limits)) return skipForBudget(s, a);
         let text: string;
         try {
-          text = await this.runner().runScheduledPrompt(a.message);
+          text = await (await this.runner()).runScheduledPrompt(a.message);
         } catch (error) {
           // The budget ran out while this run waited (another run or chat took the last request).
           if (error instanceof AppError && error.code === "AI_LIMIT_REACHED") return skipForBudget(s, a);

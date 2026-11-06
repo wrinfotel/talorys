@@ -224,7 +224,7 @@ describe("remote MCP servers: what the model can use", () => {
       expect(scheduled.available()).toEqual([]);
       await expect(scheduled.execute("mcp_docs_search_docs", { query: "a" })).rejects.toThrow(/not available/);
       // And the scheduled runner itself never asks for them.
-      expect(await a.runner().runScheduledPrompt('call mcp_docs_search_docs {"query":"a"}')).not.toContain("Found");
+      expect(await (await a.runner()).runScheduledPrompt('call mcp_docs_search_docs {"query":"a"}')).not.toContain("Found");
     });
     expect(f.calls).toEqual([]);
   });

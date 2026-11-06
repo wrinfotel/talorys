@@ -65,15 +65,18 @@ systemRoutes.get("/usage", (c) => {
     last_7_days: s.usage.lastDays(7),
     limits: settings.limits,
     model: settings.model,
-    note:
-      "Local estimates for this app before Cloudflare's free allocation, not a bill. Tokens marked est. are ~4 characters per token. Embeddings have their own daily cap.",
+    // With a custom provider the Workers AI pricing and dashboard below don't apply to chat,
+    // but the request and token counters (and the remaining Workers AI features) still do.
+    note: settings.aiProvider
+      ? "Local estimates for this app, not a bill. Tokens marked est. are ~4 characters per token. Chat runs on your custom provider, so the Cloudflare pricing and dashboard below apply only to the Workers AI features (Clef, semantic recall)."
+      : "Local estimates for this app before Cloudflare's free allocation, not a bill. Tokens marked est. are ~4 characters per token. Embeddings have their own daily cap.",
     dashboard_url: "https://dash.cloudflare.com/?to=/:account/ai/workers-ai",
     pricing: WORKERS_AI_PRICING,
   };
   return c.json(report);
 });
 
-systemRoutes.get("/system", (c) => {
+systemRoutes.get("/system", async (c) => {
   const s = c.env.agent.services;
   return c.json({
     version: TALORYS_VERSION,
@@ -81,7 +84,7 @@ systemRoutes.get("/system", (c) => {
     installation_id: c.env.env.TALORYS_INSTALLATION_ID ?? null,
     schema_version: schemaVersion(s.db),
     ai_binding: !!c.env.env.AI,
-    ai_provider: c.env.agent.aiProvider()?.id ?? "none",
+    ai_provider: (await c.env.agent.aiProvider())?.id ?? "none",
     environment: c.env.env.TALORYS_ENV === "development" ? "development" : "production",
   });
 });

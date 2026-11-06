@@ -98,12 +98,12 @@ describe("caps hold under concurrent calls", () => {
       });
       // Passes the up-front budget check, then loses the reservation inside the run.
       const lost = new AppError("AI_LIMIT_REACHED", "limit");
-      const runner = vi.spyOn(a, "runner").mockReturnValue({ runScheduledPrompt: () => Promise.reject(lost) } as unknown as AgentRunner);
+      const runner = vi.spyOn(a, "runner").mockResolvedValue({ runScheduledPrompt: () => Promise.reject(lost) } as unknown as AgentRunner);
       try {
         expect(await a["executeAutomation"](automation)).toEqual({ status: "skipped", result: "Scheduled AI budget reached" });
         expect(s.notifications.list({ limit: 1 })[0]).toMatchObject({ title: "Morning brief", body: expect.stringContaining("Skipped: the daily budget") });
         // Any other failure still surfaces as an error.
-        runner.mockReturnValue({ runScheduledPrompt: () => Promise.reject(new AppError("AI_UNAVAILABLE", "down")) } as unknown as AgentRunner);
+        runner.mockResolvedValue({ runScheduledPrompt: () => Promise.reject(new AppError("AI_UNAVAILABLE", "down")) } as unknown as AgentRunner);
         await expect(a["executeAutomation"](automation)).rejects.toMatchObject({ code: "AI_UNAVAILABLE" });
       } finally {
         runner.mockRestore();

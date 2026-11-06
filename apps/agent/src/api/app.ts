@@ -5,6 +5,7 @@ import type { Env } from "../env";
 import { errorResponse, NotFoundError } from "./errors";
 import { csrfProtection, requireSession, securityHeaders } from "./middleware";
 import { authRoutes } from "./routes/auth";
+import { aiProviderRoutes } from "./routes/ai-provider";
 import { chatRoutes } from "./routes/chat";
 import { dataRoutes } from "./routes/data";
 import { automationRoutes } from "./routes/automations";
@@ -43,6 +44,7 @@ export function createApi() {
   // First, so its middleware wraps the upstream /memories and /import handlers.
   app.route("/", semanticRoutes);
   app.route("/", systemRoutes);
+  app.route("/", aiProviderRoutes);
   app.route("/auth", authRoutes);
   app.route("/", chatRoutes);
   app.route("/", dataRoutes);
