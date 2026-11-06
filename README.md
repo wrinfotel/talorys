@@ -4,6 +4,16 @@
 
 Website: [rociiu.github.io/talorys](https://rociiu.github.io/talorys/)
 
+> 🇷🇺 **Новичок здесь?** Пошаговая инструкция на русском — установка, своя модель (OpenRouter),
+> Telegram-бот и улучшенный поиск: [**docs/quick-start-ru.md**](docs/quick-start-ru.md).
+> Никакой серверной магии: нужны только бесплатный аккаунт Cloudflare и 30 минут.
+
+This fork adds, on top of upstream Talorys:
+
+- **Custom AI providers** — bring your own OpenAI-compatible model (OpenRouter, OpenAI, Groq, Ollama) in Settings → AI; Workers AI stays the default. See [docs/custom-ai-provider.md](docs/custom-ai-provider.md).
+- **Telegram bot** — chat with your agent and receive reminders in Telegram. See [docs/telegram-bot.md](docs/telegram-bot.md).
+- **Web access** — the agent reads public pages and searches the web (`web_fetch` / `web_search`), optionally via a free Tavily key (Settings → Integrations).
+
 Talorys is a free, open-source personal AI assistant that runs entirely inside
 **your own Cloudflare account**. It chats with you, remembers what matters,
 manages tasks, notes and projects, and runs reminders and routines on a
