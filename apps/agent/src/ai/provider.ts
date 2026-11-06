@@ -69,6 +69,36 @@ export interface AIProvider {
   generateWithTools(req: ToolRequest): AsyncIterable<AgentEvent>;
 }
 
+/**
+ * Stand-in used when a custom provider is configured but its stored API key cannot be
+ * decrypted (a rotated or missing MCP_CREDENTIAL_KEY). Every call fails with the same
+ * explicit error instead of silently falling back to Workers AI.
+ */
+export class UnavailableAiProvider implements AIProvider {
+  readonly id = "unavailable";
+  readonly model = "unavailable";
+  readonly billable = false;
+
+  private failure(): AppError {
+    return new AppError("NOT_CONFIGURED", "The custom AI provider credentials could not be read. Re-save the API key in Settings → AI.");
+  }
+
+  async generate(_req: GenerateRequest): Promise<{ text: string; usage: Usage }> {
+    throw this.failure();
+  }
+
+  // Thrown before any yield: the caller's first `next()` rejects with the explicit error.
+  // biome-ignore lint/correctness/useYield: the generator only ever fails, it never produces events.
+  async *stream(_req: GenerateRequest): AsyncIterable<AgentEvent> {
+    throw this.failure();
+  }
+
+  // biome-ignore lint/correctness/useYield: the generator only ever fails, it never produces events.
+  async *generateWithTools(_req: ToolRequest): AsyncIterable<AgentEvent> {
+    throw this.failure();
+  }
+}
+
 /** Rough token estimate (≈4 chars/token) from text or an accumulated character count. */
 export function estimateTokens(text: string | number): number {
   return Math.ceil((typeof text === "number" ? text : text.length) / 4);
