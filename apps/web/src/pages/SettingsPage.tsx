@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { checkPasswordStrength, GITHUB_URL, LANGUAGES, LIMIT_CEILINGS, type Limits, type MemoryHistorySettings, type Settings, TALORYS_VERSION } from "@talorys/shared";
+import { type AiProviderStatus, checkPasswordStrength, GITHUB_URL, LANGUAGES, LIMIT_CEILINGS, type Limits, type MemoryHistorySettings, type Settings, TALORYS_VERSION } from "@talorys/shared";
 import { Download, ExternalLink, LogOut, Monitor, Moon, Sun, Upload } from "lucide-react";
 import { Badge, Button, Card, ConfirmDialog, ErrorNotice, Input, Label, PageHeader, Select, Spinner, Switch } from "../components/ui";
 import { SemanticRecallCard } from "../components/SemanticRecallCard";
@@ -10,7 +10,7 @@ import { PushNotificationsCard } from "../components/PushNotificationsCard";
 import { RemoteAccessCard } from "../components/RemoteAccessCard";
 import { McpServersCard } from "../components/McpServersCard";
 import { UsageBreakdown, UsagePricingNote } from "../components/UsageBreakdown";
-import { keys, useApiMutation, useSessions, useSettings, useSystemInfo, useUpdateStatus, useUsage } from "../hooks/queries";
+import { keys, useAiProvider, useApiMutation, useSessions, useSettings, useSystemInfo, useUpdateStatus, useUsage } from "../hooks/queries";
 import { useSession } from "../hooks/session";
 import { useToast, errorMessage } from "../hooks/toast";
 import { api, ApiError } from "../lib/api";
@@ -204,6 +204,138 @@ const LIMIT_FIELDS: { key: keyof Limits; label: string; hint: string }[] = [
   { key: "maxScheduledAiRunsPerDay", label: "Max scheduled AI runs per day", hint: "Budget for AI routines. Reminders never use AI." },
 ];
 
+type ProviderMode = "workers-ai" | "custom";
+
+/**
+ * Chooses between the default Workers AI and a custom OpenAI-compatible provider.
+ * The mode and the form fields are local state, not auto-saved: nothing changes on the
+ * server until Save (or Disconnect) is pressed. The API key is write-only: the server
+ * never returns it, so the field always starts empty.
+ */
+function ProviderSection({ settings, mode, onModeChange }: { settings: Settings; mode: ProviderMode; onModeChange: (mode: ProviderMode) => void }) {
+  const { t } = useI18n();
+  const status = useAiProvider();
+  const [baseUrl, setBaseUrl] = useState(settings.aiProvider?.baseUrl ?? "");
+  const [model, setModel] = useState(settings.aiProvider?.model ?? "");
+  const [apiKey, setApiKey] = useState("");
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const customConfigured = !!settings.aiProvider;
+
+  const changeMode = (next: ProviderMode) => {
+    onModeChange(next);
+    setTestResult(null);
+    // Coming back to the form restores whatever is currently saved.
+    if (next === "custom") {
+      setBaseUrl(settings.aiProvider?.baseUrl ?? "");
+      setModel(settings.aiProvider?.model ?? "");
+      setApiKey("");
+    }
+  };
+
+  const saveProvider = useApiMutation(
+    () =>
+      api<AiProviderStatus>("/ai-provider", {
+        method: "PUT",
+        body: { base_url: baseUrl.trim(), model: model.trim(), ...(apiKey ? { api_key: apiKey } : {}) },
+      }),
+    {
+      invalidate: [keys.settings, keys.aiProvider, keys.usage, keys.system],
+      success: t("aiProvider.saved"),
+      onSuccess: () => {
+        setApiKey("");
+        setTestResult(null);
+      },
+    },
+  );
+
+  const testProvider = useApiMutation(
+    () =>
+      api<{ ok: boolean; model?: string; error?: string }>("/ai-provider/test", {
+        method: "POST",
+        body: {
+          ...(baseUrl.trim() ? { base_url: baseUrl.trim() } : {}),
+          ...(model.trim() ? { model: model.trim() } : {}),
+          ...(apiKey ? { api_key: apiKey } : {}),
+        },
+      }),
+    {
+      // The result is shown inline, so no error toast here.
+      quiet: true,
+      onSuccess: (r) =>
+        setTestResult(r.ok ? { ok: true, message: t("aiProvider.testOk", { model: r.model ?? model }) } : { ok: false, message: r.error ?? t("aiProvider.testFailed") }),
+      onError: (error) => setTestResult({ ok: false, message: errorMessage(error, t("aiProvider.testFailed")) }),
+    },
+  );
+
+  const disconnect = useApiMutation(() => api<AiProviderStatus>("/ai-provider", { method: "DELETE" }), {
+    invalidate: [keys.settings, keys.aiProvider, keys.usage, keys.system],
+    success: t("aiProvider.disconnected"),
+    onSuccess: () => {
+      onModeChange("workers-ai");
+      setApiKey("");
+      setTestResult(null);
+    },
+  });
+
+  return (
+    <Section title={t("aiProvider.section")}>
+      <Row label={t("aiProvider.mode")} hint={mode === "custom" ? t("aiProvider.customHint") : t("aiProvider.workersHint")}>
+        <Select value={mode} onChange={(e) => changeMode(e.target.value as ProviderMode)} aria-label={t("aiProvider.mode")}>
+          <option value="workers-ai">{t("aiProvider.modeWorkers")}</option>
+          <option value="custom">{t("aiProvider.modeCustom")}</option>
+        </Select>
+      </Row>
+      {mode === "custom" &&
+        (status.isLoading ? (
+          <div className="flex justify-center py-6">
+            <Spinner />
+          </div>
+        ) : (
+          <>
+            <Row label={t("aiProvider.baseUrl")} hint={t("aiProvider.baseUrlHint")}>
+              <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" aria-label={t("aiProvider.baseUrl")} className="font-mono text-xs" />
+            </Row>
+            <Row label={t("aiProvider.model")} hint={t("aiProvider.modelHint")}>
+              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="openai/gpt-4o-mini" aria-label={t("aiProvider.model")} className="font-mono text-xs" />
+            </Row>
+            <Row label={t("aiProvider.apiKey")} hint={t("aiProvider.apiKeyHint")}>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={status.data?.has_api_key ? t("aiProvider.keyStored") : t("aiProvider.keyPlaceholder")}
+                aria-label={t("aiProvider.apiKey")}
+              />
+            </Row>
+            {testResult && <div className={`px-5 py-3 text-sm ${testResult.ok ? "text-success" : "text-danger"}`}>{testResult.message}</div>}
+            <div className="flex flex-wrap justify-end gap-2 px-5 py-3">
+              <Button variant="ghost" loading={testProvider.isPending} onClick={() => testProvider.mutate(undefined)}>
+                {t("aiProvider.test")}
+              </Button>
+              <Button variant="outline" disabled={!customConfigured} onClick={() => setConfirmDisconnect(true)} loading={disconnect.isPending}>
+                {t("aiProvider.disconnect")}
+              </Button>
+              <Button disabled={!baseUrl.trim() || !model.trim()} loading={saveProvider.isPending} onClick={() => saveProvider.mutate(undefined)}>
+                {t("common.save")}
+              </Button>
+            </div>
+            <ConfirmDialog
+              open={confirmDisconnect}
+              title={t("aiProvider.disconnectTitle")}
+              message={t("aiProvider.disconnectMessage")}
+              confirmLabel={t("aiProvider.disconnect")}
+              onCancel={() => setConfirmDisconnect(false)}
+              onConfirm={() => disconnect.mutate(undefined)}
+              loading={disconnect.isPending}
+            />
+          </>
+        ))}
+    </Section>
+  );
+}
+
 function AiTab({ settings }: { settings: Settings }) {
   const i18n = useI18n();
   const save = useSaveSettings();
@@ -211,24 +343,29 @@ function AiTab({ settings }: { settings: Settings }) {
   const [model, setModel] = useState(settings.model);
   const [limits, setLimits] = useState<Limits>(settings.limits);
   const [temperature, setTemperature] = useState(settings.temperature);
+  // Local form state: switching provider mode only changes what Save/Disconnect will do.
+  const [providerMode, setProviderMode] = useState<ProviderMode>(settings.aiProvider ? "custom" : "workers-ai");
   const dirtyLimits = JSON.stringify(limits) !== JSON.stringify(settings.limits) || temperature !== settings.temperature;
   return (
     <>
+      <ProviderSection settings={settings} mode={providerMode} onModeChange={setProviderMode} />
       <Section title="Model">
-        <Row label="Workers AI model" hint="Default: @cf/zai-org/glm-4.7-flash. Must support tool calling.">
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (model !== settings.model) save.mutate({ model: model.trim() });
-            }}
-          >
-            <Input value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model id" className="font-mono text-xs" />
-            <Button type="submit" variant="outline" disabled={model === settings.model}>
-              Save
-            </Button>
-          </form>
-        </Row>
+        {providerMode === "workers-ai" && (
+          <Row label="Workers AI model" hint="Default: @cf/zai-org/glm-4.7-flash. Must support tool calling.">
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (model !== settings.model) save.mutate({ model: model.trim() });
+              }}
+            >
+              <Input value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model id" className="font-mono text-xs" />
+              <Button type="submit" variant="outline" disabled={model === settings.model}>
+                Save
+              </Button>
+            </form>
+          </Row>
+        )}
         <Row label="Learn from conversations" hint="Let Talorys save clearly lasting preferences without being asked. Off = only explicit “remember …”.">
           <div className="flex justify-end">
             <Switch checked={settings.autoMemory} onChange={(v) => save.mutate({ autoMemory: v })} label="Learn from conversations" />

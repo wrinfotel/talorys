@@ -1,4 +1,5 @@
 import type {
+  AiProviderStatus,
   Automation,
   AutomationRun,
   Conversation,
@@ -24,6 +25,7 @@ import { useI18n } from "../lib/i18n";
 
 export const keys = {
   settings: ["settings"] as const,
+  aiProvider: ["ai-provider"] as const,
   conversations: (q?: string) => ["conversations", q ?? ""] as const,
   conversation: (id: string) => ["conversation", id] as const,
   tasks: ["tasks"] as const,
@@ -46,6 +48,11 @@ export const keys = {
 
 export function useSettings() {
   return useQuery({ queryKey: keys.settings, queryFn: () => api<{ settings: Settings }>("/settings").then((r) => r.settings), staleTime: 60_000 });
+}
+
+/** Custom AI provider status. The stored API key is never part of the response. */
+export function useAiProvider() {
+  return useQuery({ queryKey: keys.aiProvider, queryFn: () => api<AiProviderStatus>("/ai-provider") });
 }
 
 /** Owner timezone with a safe fallback while settings load. */
