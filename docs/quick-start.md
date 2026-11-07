@@ -167,21 +167,51 @@ Message the assistant (browser or Telegram):
 
 ## Updating Talorys when a new version comes out
 
-Open the black window, go to your Talorys folder and run:
+Everything your assistant knows — conversations, tasks, memories, settings,
+keys — lives in your Cloudflare account, not in the folders on your computer.
+Updating only swaps the program code, so it is safe to run whenever a new
+version comes out, and your assistant keeps working until then.
+
+1. Open the black window (**Win+R** → `cmd` → Enter) and go to the Talorys
+   folder from Step 1:
+   ```
+   cd C:\projects\talorys
+   ```
+2. Download the new version and rebuild the program (a couple of minutes):
+   ```
+   git pull
+   npm install
+   npm run build
+   ```
+3. Redeploy your assistant:
+   ```
+   node packages\create-talorys\dist\cli.js update --dir "C:\path\to\install\folder"
+   ```
+   (on macOS and Linux use forward slashes: `packages/create-talorys/dist/cli.js`).
+   Replace `C:\path\to\install\folder` with the folder the installer created
+   during the first install — it contains the `talorys.json` file. The updater
+   shows a short summary and asks to confirm; it re-asks nothing you already
+   answered — your password, keys and settings are kept as they are.
+4. Wait a minute or two, then open your assistant as usual. A browser tab left
+   open reloads itself; if the update changed the Telegram command menu, the
+   bot refreshes it after your next message to it.
+
+**Don't remember the install folder?** Search the computer for a file named
+`talorys.json` (the File Explorer search box finds it), or look at what the
+installer printed when it finished the first install. To see what is deployed
+right now — version, address, health — run this from the Talorys folder (same
+`--dir` argument as `update`):
 
 ```
-git pull
-npm install
-npm run build
-node packages\create-talorys\dist\cli.js update --dir "C:\path\to\install\folder"
+node packages\create-talorys\dist\cli.js status
 ```
 
-Replace `C:\path\to\install\folder` with the folder the installer created during the
-first install — it contains the `talorys.json` file (the installer printed the path at
-the end). All your data, settings and keys survive updates.
-
-> 💡 After an update, wait a minute or two: part of the system restarts with a short
-> delay, so new settings may not appear instantly.
+If `git pull` stops with errors (it usually means the Talorys folder was
+changed locally), the simple way out is a fresh copy — none of your data lives
+in that folder: rename it (e.g. `talorys` → `talorys-old`), repeat Step 1
+(clone, `npm install`, `npm run build`), and run the update from Step 3
+pointing at the same install folder. Once everything works, the old folder can
+be deleted.
 
 ---
 

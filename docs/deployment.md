@@ -140,6 +140,19 @@ a plain variable would be dropped when an update regenerates the Worker config.
 The installer's `update` command (`node packages/create-talorys/dist/cli.js update --dir "<install folder>"`) refreshes artifacts, keeps the same names
 and Durable Object class, appends (never edits) migrations, keeps secrets, and
 re-verifies. Schema migrations run transactionally inside the Durable Object.
+It prompts for confirmation (skip with `-y`) and re-asks nothing that already
+exists — the password, keys and names are reused from the manifest; a `--dir`
+without `talorys.json` is rejected with "No Talorys installation found".
+
+This fork's installer deploys the templates built in the repo, so after
+`git pull` always run `npm install && npm run build` before `update`.
+`status --dir "<install folder>"` reports the deployed version, URL and health
+checks, and `doctor` diagnoses a broken environment. The install folder is the
+only state on disk (`talorys.json` holds no secrets), so updating from a fresh
+clone — or from another machine signed in to the same Cloudflare account —
+works by pointing `update` at the same folder. A step-by-step walkthrough for
+non-technical users lives in
+[quick-start.md](quick-start.md#updating-talorys-when-a-new-version-comes-out).
 
 ## Permissions
 
