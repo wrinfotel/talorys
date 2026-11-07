@@ -54,6 +54,8 @@ memories and limits as the chat in the web UI:
   web chat (it is the same conversation) and the Telegram reply stops too.
 - `/new` — start a fresh conversation. The old one remains in Talorys under
   Conversations.
+- `/resume` — list the recent conversations; `/resume 2` switches the chat
+  back to the second of them, and the next plain message continues it.
 - `/status` — the model the assistant is running on, and whether web search
   and notifications are on.
 - `/help` — a short summary of what the bot can do.
@@ -62,9 +64,10 @@ memories and limits as the chat in the web UI:
 
 Connecting the bot also registers its commands with Telegram, so the menu
 button next to the message field lists them: in English by default, and in
-Russian when the Telegram app's language is Russian. A bot that was connected
-before this feature existed picks the menu up on its next message in the
-paired chat; disconnecting and connecting again registers it too.
+Russian when the Telegram app's language is Russian. When the command set
+changes in an update, a bot that is already connected refreshes its menu on
+its next message in the paired chat; disconnecting and connecting again
+registers it too.
 
 ## Notifications
 

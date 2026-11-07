@@ -1,6 +1,7 @@
 import type { TalorysAgent } from "../agent/talorys-agent";
 import type { AgentRunner } from "../agent/runner";
 import type { Services } from "../services/container";
+import { clip } from "../services/text";
 
 /** The part of a Telegram update this handler reacts to. Everything else is ignored. */
 export interface TelegramUpdateMessage {
@@ -32,6 +33,7 @@ const NEW_CONVERSATION_REPLY = "Started a new conversation.";
 const HELP_REPLY = [
   "You can send me messages in plain text — I answer like the chat in Talorys, with the same tools and memories.",
   "/new — start a fresh conversation (the old one stays in Talorys).",
+  "/resume — list recent conversations; /resume 2 continues the second of them.",
   "/status — the model I'm running on, and whether web search and notifications are on.",
   "/help — this text.",
   "Reminders and automation results are also delivered to this chat while notifications are on.",
@@ -41,6 +43,31 @@ const FAILED_REPLY = "Something went wrong.";
 
 /** One-time pairing codes: 8 characters from the digits-and-uppercase alphabet. */
 const PAIRING_CODE = /^\/start\s+([A-Z2-9]{8})$/;
+
+/** `/resume` with no argument lists this many conversations, most recent first; `/resume <n>` picks one. */
+const RESUME_LIST_SIZE = 10;
+const RESUME_MATCH = /^\/resume(?:\s+(\d{1,3}))?$/;
+
+/** Short human-readable age for the /resume list, in the handler's English voice. */
+function ago(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 7 * 86_400) return `${Math.floor(seconds / 86_400)}d ago`;
+  return iso.slice(0, 10);
+}
+
+/** The bare-/resume answer: recent conversations, numbered in the same order /resume <n> expects. */
+function resumeListReply(deps: UpdateHandlerDeps): string {
+  const current = deps.services.telegram.conversationId();
+  const lines = deps.services.conversations.list({ limit: RESUME_LIST_SIZE }).map((c, i) => {
+    const title = c.title.length > 40 ? `${clip(c.title, 39)}…` : c.title;
+    return `${i + 1}. ${title} · ${ago(c.updated_at)}${c.id === current ? " ← here" : ""}`;
+  });
+  if (lines.length === 0) return "No conversations yet — just send me a message to start one.";
+  return ["Recent conversations — reply /resume <number> to continue one:", ...lines].join("\n");
+}
 
 /** The "/status" answer: what the assistant is running on, in the same voice as the web UI. */
 async function statusReply(deps: UpdateHandlerDeps): Promise<string> {
@@ -100,6 +127,26 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
     if (text === "/new") {
       telegram.forgetConversation();
       await telegram.sendMessage(chatId, NEW_CONVERSATION_REPLY);
+      return;
+    }
+    const resume = RESUME_MATCH.exec(text);
+    if (resume) {
+      if (!resume[1]) {
+        await telegram.sendMessage(chatId, resumeListReply(deps));
+        return;
+      }
+      // The number always means "n-th most recent", so it can't go stale between listings.
+      const target = deps.services.conversations.list({ limit: RESUME_LIST_SIZE })[Number(resume[1]) - 1];
+      if (!target) {
+        await telegram.sendMessage(chatId, `There's no conversation number ${resume[1]} on the list — send /resume to see the recent ones.`);
+        return;
+      }
+      const busy = deps.activeRuns.has(target.id);
+      const alreadyHere = telegram.conversationId() === target.id;
+      telegram.rememberConversation(target.id);
+      const title = target.title.length > 40 ? `${clip(target.title, 39)}…` : target.title;
+      const note = busy ? " It's still answering a previous message — one moment." : alreadyHere ? " (already the current conversation)" : "";
+      await telegram.sendMessage(chatId, `Switched to “${title}”.${note} Send me a message to continue it.`);
       return;
     }
     if (text === "/status") {

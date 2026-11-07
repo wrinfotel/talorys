@@ -127,9 +127,10 @@ access to hundreds of models (free and paid) with a single key.
    (with your code, e.g. `/start AB12CD34`).
 7. The bot confirms the pairing. Now message it like a regular chat — it answers with
    the same agent as the browser: same memory, tasks and tools.
-8. Useful bot commands: `/new` — start a fresh conversation, `/status` — which model and
-   options are active, `/help` — help text. They also appear in the bot's menu — tap the
-   menu button (≡) next to the message field in the chat.
+8. Useful bot commands: `/new` — start a fresh conversation, `/resume` — switch back to one
+   of the recent conversations, `/status` — which model and options are active, `/help` —
+   help text. They also appear in the bot's menu — tap the menu button (≡) next to the
+   message field in the chat.
 
 **Notifications in Telegram:** in the same card, turn on **Deliver notifications here** —
 reminders and routine results will arrive in your chat.

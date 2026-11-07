@@ -107,6 +107,7 @@ describe("telegram service", () => {
       // The "/" command menu: English by default, then the Russian client override.
       expect(api.sent[2]!.body.commands).toEqual([
         { command: "new", description: "Start a fresh conversation" },
+        { command: "resume", description: "Continue a recent conversation" },
         { command: "status", description: "Model, web search and notifications" },
         { command: "help", description: "What this bot can do" },
       ]);
@@ -165,6 +166,24 @@ describe("telegram service", () => {
       t.ensureCommandsInBackground();
       await t.idle();
       expect(api.sent.filter((c) => c.url.endsWith("/setMyCommands"))).toHaveLength(3);
+    });
+  });
+
+  it("re-registers the menu when the deployed command set is newer than the stored one", async () => {
+    await inAgent(async (agent) => {
+      const t = makeTelegram(agent, happy().fetcher);
+      await t.connect(TOKEN, "https://me.pages.dev");
+      expect(t.commandsRegistered()).toBe(true);
+
+      // A config written by an older deployment has no (or a lower) commands version.
+      const config = agent.services.settings.getJson<Record<string, unknown>>("telegram.config")!;
+      delete config.commands_version;
+      agent.services.settings.setJson("telegram.config", config);
+      expect(t.commandsRegistered()).toBe(false);
+
+      t.ensureCommandsInBackground();
+      await t.idle();
+      expect(t.commandsRegistered()).toBe(true);
     });
   });
 

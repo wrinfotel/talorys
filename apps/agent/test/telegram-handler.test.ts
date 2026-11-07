@@ -147,6 +147,7 @@ describe("telegram owner chat", () => {
 
       await processUpdate(agentDeps(agent), update("/help"));
       expect(replies(api)[1]).toContain("/new");
+      expect(replies(api)[1]).toContain("/resume");
       expect(replies(api)[1]).toContain("/status");
       expect(replies(api)[1]).toContain("/help");
     });
@@ -178,6 +179,45 @@ describe("telegram owner chat", () => {
       agent.services.settings.setJson("ai.credentials", { credential: "v1.garbage" });
       await processUpdate(agentDeps(agent), update("/status"));
       expect(replies(api)[3]).toContain("the API key is unreadable, save it again in Settings → AI");
+    });
+  });
+
+  it("/resume lists recent conversations and /resume <n> switches to one", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      const t = agent.services.telegram;
+
+      await processUpdate(agentDeps(agent), update("/resume"));
+      expect(replies(api)[0]).toBe("No conversations yet — just send me a message to start one.");
+
+      const older = agent.services.conversations.create("Watering the plants");
+      const newer = agent.services.conversations.create("Trip to Japan");
+      // Distinct timestamps: list() orders by updated_at, and two same-ms creates would tie.
+      agent.services.db.run(`UPDATE tal_conversations SET updated_at = '2026-11-07T10:00:00.000Z' WHERE id = ?`, older.id);
+      agent.services.db.run(`UPDATE tal_conversations SET updated_at = '2026-11-07T12:00:00.000Z' WHERE id = ?`, newer.id);
+
+      await processUpdate(agentDeps(agent), update("/resume"));
+      const list = replies(api)[1]!;
+      expect(list).toContain("1. Trip to Japan");
+      expect(list).toContain("2. Watering the plants");
+
+      await processUpdate(agentDeps(agent), update("/resume 2"));
+      expect(replies(api)[2]).toContain("Switched to “Watering the plants”.");
+      expect(t.conversationId()).toBe(older.id);
+
+      // The listing marks the conversation the chat now continues.
+      await processUpdate(agentDeps(agent), update("/resume"));
+      expect(replies(api)[3]).toMatch(/2\. Watering the plants .*← here/);
+      expect(replies(api)[3]).not.toMatch(/1\. Trip to Japan.*← here/);
+
+      await processUpdate(agentDeps(agent), update("/resume 9"));
+      expect(replies(api)[4]).toBe("There's no conversation number 9 on the list — send /resume to see the recent ones.");
+
+      // A plain message after the switch continues the chosen conversation, not the newest.
+      await processUpdate(agentDeps(agent), update("hello again"));
+      expect(agent.services.conversations.messages(older.id).some((m) => m.role === "user" && m.content === "hello again")).toBe(true);
+      expect(agent.services.conversations.messages(newer.id).some((m) => m.content === "hello again")).toBe(false);
     });
   });
 
