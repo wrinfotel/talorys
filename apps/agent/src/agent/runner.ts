@@ -23,6 +23,99 @@ export function titleFromMessage(message: string): string {
   return `${lastSpace > 30 ? cut.slice(0, lastSpace) : cut}…`;
 }
 
+/** How many recent messages a manual compaction keeps verbatim; the rest folds into the summary. */
+const COMPACT_KEEP_RECENT = 6;
+
+/** The message history a turn sees: current task/plan state, approvals resolved, user or complete messages only. */
+function turnHistory(s: Services, conversationId: string): ChatMessage[] {
+  return s.taskPlans
+    .withCurrentState(s.pendingActions.withCurrentStatus(s.conversations.messages(conversationId, { limit: 200 })))
+    .filter((m) => m.role === "user" || m.status === "complete")
+    .map(withApprovalOutcomes);
+}
+
+/** The history token budget of the next turn; no memories are selected without a new owner message. */
+function historyBudgetFor(services: Services, conversationSummary: string | null): number {
+  const settings = services.settings.get();
+  const baseSystem = buildSystemPrompt({
+    agentName: settings.agentName,
+    timezone: settings.timezone,
+    now: new Date(),
+    autoMemory: settings.autoMemory,
+    memories: [],
+    conversationSummary,
+  });
+  return Math.max(500, settings.limits.maxContextTokens - estimateTokens(baseSystem) - 600);
+}
+
+export interface ContextView {
+  /** Messages the next turn would consider (user + completed assistant, last 200). */
+  messages: number;
+  /** Messages the next turn would send verbatim. */
+  kept: number;
+  /** Estimated tokens of those kept messages, and the budget they fit into. */
+  keptTokens: number;
+  historyBudget: number;
+  /** Length of the running summary covering older messages, null when there is none. */
+  summaryChars: number | null;
+  /** Messages beyond the window that the next turn's automatic summarizer would fold in. */
+  overflowPending: number;
+}
+
+/** The context picture of a conversation's next turn, computed exactly the way the turn computes it. */
+export function contextView(services: Services, conversationId: string): ContextView | null {
+  const conversation = services.conversations.get(conversationId);
+  if (!conversation) return null;
+  const history = turnHistory(services, conversation.id);
+  const historyBudget = historyBudgetFor(services, conversation.summary);
+  const window = buildContextWindow(history, historyBudget, conversation.summary_upto);
+  return {
+    messages: history.length,
+    kept: window.messages.length,
+    keptTokens: window.messages.reduce((sum, m) => sum + estimateTokens(m.content) + 4, 0),
+    historyBudget,
+    summaryChars: conversation.summary?.length ?? null,
+    overflowPending: window.overflow.length,
+  };
+}
+
+export interface CompactOutcome {
+  /** Messages folded into the running summary. */
+  summarized: number;
+  /** The conversation's context picture after the fold. */
+  view: ContextView;
+}
+
+/**
+ * Manual compaction (e.g. a Telegram /compact command): folds everything except the recent
+ * tail into the running summary with one summarization call, written exactly like the turn's
+ * automatic summarizer writes it, so the next turn builds a smaller window. Null when there
+ * is nothing to fold. Spends one AI request, as any summarization does.
+ */
+export async function compactConversation(opts: { services: Services; provider: AIProvider; conversationId: string }): Promise<CompactOutcome | null> {
+  const s = opts.services;
+  const conversation = s.conversations.get(opts.conversationId);
+  if (!conversation) return null;
+  const eligible = turnHistory(s, conversation.id).filter(
+    (m) => m.content.trim().length > 0 && (!conversation.summary_upto || m.created_at > conversation.summary_upto),
+  );
+  const batch = eligible.slice(0, Math.max(0, eligible.length - COMPACT_KEEP_RECENT));
+  if (batch.length === 0) return null;
+
+  s.usage.increment({ ai_requests: 1 });
+  const result = await opts.provider.generate({
+    system: "You write compact, factual conversation summaries.",
+    messages: summarizationPrompt(conversation.summary, batch),
+    maxOutputTokens: 300,
+    temperature: 0.2,
+  });
+  s.usage.record(result.usage);
+  s.conversations.setSummary(conversation.id, result.text.trim().slice(0, 2000), batch.at(-1)!.created_at);
+  const view = contextView(s, conversation.id);
+  if (!view) return null;
+  return { summarized: batch.length, view };
+}
+
 function toolLabel(tool: ToolDefinition | undefined, name: string, input: unknown): string {
   if (!tool) return name;
   const parsed = tool.input.safeParse(input);
@@ -148,10 +241,7 @@ export class AgentRunner {
       const selected = this.ext ? await this.ext.selectMemories(userMessage.content) : selectRelevantMemories(s.memories, userMessage.content);
       const memories = s.memoryHistory.promptMemories(selected, memoryTokenBudget(limits));
       const items = this.ext?.selectItems ? await this.ext.selectItems(userMessage.content) : undefined;
-      const history = s.taskPlans
-        .withCurrentState(s.pendingActions.withCurrentStatus(s.conversations.messages(conversation.id, { limit: 200 })))
-        .filter((m) => m.role === "user" || m.status === "complete")
-        .map(withApprovalOutcomes);
+      const history = turnHistory(s, conversation.id);
       let summary = conversation.summary;
       let summaryUpto = conversation.summary_upto;
       const baseSystem = buildSystemPrompt({

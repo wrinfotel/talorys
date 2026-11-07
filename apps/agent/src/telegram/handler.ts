@@ -1,5 +1,6 @@
 import type { TalorysAgent } from "../agent/talorys-agent";
-import type { AgentRunner } from "../agent/runner";
+import { type AgentRunner, compactConversation, contextView } from "../agent/runner";
+import type { AIProvider } from "../ai/provider";
 import type { Services } from "../services/container";
 import { clip } from "../services/text";
 
@@ -22,6 +23,8 @@ export interface UpdateHandlerDeps {
   activeRuns: Map<string, AbortController>;
   /** Resolves to the stored custom-provider API key (null when absent or unreadable); the real agent satisfies this. */
   customProviderKey?: () => Promise<string | null>;
+  /** The AI provider the next turn would use (null when none is configured); manual compaction summarizes with it. */
+  aiProvider?: () => Promise<AIProvider | null>;
 }
 
 const PAIRED_REPLY = "Paired! This chat is now linked to your Talorys agent.";
@@ -34,6 +37,8 @@ const HELP_REPLY = [
   "You can send me messages in plain text — I answer like the chat in Talorys, with the same tools and memories.",
   "/new — start a fresh conversation (the old one stays in Talorys).",
   "/resume — list recent conversations; /resume 2 continues the second of them.",
+  "/context — how full the current conversation's context window is.",
+  "/compact — fold older messages into the conversation summary to free context.",
   "/status — the model I'm running on, and whether web search and notifications are on.",
   "/help — this text.",
   "Reminders and automation results are also delivered to this chat while notifications are on.",
@@ -67,6 +72,58 @@ function resumeListReply(deps: UpdateHandlerDeps): string {
   });
   if (lines.length === 0) return "No conversations yet — just send me a message to start one.";
   return ["Recent conversations — reply /resume <number> to continue one:", ...lines].join("\n");
+}
+
+/** The conversation this chat currently continues, or null when none was started (or it was deleted). */
+function currentConversation(deps: UpdateHandlerDeps): { id: string; title: string } | null {
+  const stored = deps.services.telegram.conversationId();
+  const conversation = stored ? deps.services.conversations.get(stored) : null;
+  return conversation ? { id: conversation.id, title: conversation.title } : null;
+}
+
+/** The "/context" answer: how the next turn's context window looks for the current conversation. */
+function contextReply(deps: UpdateHandlerDeps): string {
+  const conversation = currentConversation(deps);
+  if (!conversation) return "No conversation is going on in this chat yet — send me a message, or /resume an older one.";
+  const view = contextView(deps.services, conversation.id)!;
+  const title = conversation.title.length > 40 ? `${clip(conversation.title, 39)}…` : conversation.title;
+  const percent = Math.round((view.keptTokens / view.historyBudget) * 100);
+  const lines = [
+    `Context of “${title}”:`,
+    `• Window: ${view.kept} of ${view.messages} messages, ~${view.keptTokens} of ${view.historyBudget} tokens (${percent}%)`,
+    view.summaryChars === null
+      ? "• Summary: none yet — the full recent history is in the window"
+      : `• Summary: ${view.summaryChars} characters covering older messages`,
+  ];
+  if (view.overflowPending > 0) lines.push(`• ${view.overflowPending} messages beyond the window will be summarized on the next reply`);
+  return lines.join("\n");
+}
+
+/** The "/compact" answer: folds everything but the recent tail into the summary, with one AI call. */
+async function compactReply(deps: UpdateHandlerDeps): Promise<string> {
+  const s = deps.services;
+  const conversation = currentConversation(deps);
+  if (!conversation) return "No conversation is going on in this chat yet — send me a message, or /resume an older one.";
+  if (deps.activeRuns.has(conversation.id)) return BUSY_REPLY;
+  if (s.usage.remainingAi(s.settings.get().limits) < 1) {
+    return "The daily AI limit is already reached — folding history needs one AI call. Try tomorrow.";
+  }
+  const provider = deps.aiProvider ? await deps.aiProvider() : null;
+  if (!provider) return "No AI model is configured on this deployment.";
+  try {
+    const outcome = await compactConversation({ services: s, provider, conversationId: conversation.id });
+    if (!outcome) return "Nothing to compact — this conversation is short and fits comfortably.";
+    const percent = Math.round((outcome.view.keptTokens / outcome.view.historyBudget) * 100);
+    const lines = [
+      `Compacted: ${outcome.summarized} messages folded into the summary.`,
+      `The window is now ${outcome.view.kept} messages, ~${outcome.view.keptTokens} of ${outcome.view.historyBudget} tokens (${percent}%).`,
+    ];
+    if (outcome.view.overflowPending > 0) lines.push(`${outcome.view.overflowPending} messages are still beyond the window and will be summarized on the next reply.`);
+    return lines.join("\n");
+  } catch (error) {
+    console.warn("Telegram /compact failed", error instanceof Error ? error.message : String(error));
+    return "Compaction failed — the model couldn't summarize right now. Try again in a moment.";
+  }
 }
 
 /** The "/status" answer: what the assistant is running on, in the same voice as the web UI. */
@@ -149,6 +206,14 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
       await telegram.sendMessage(chatId, `Switched to “${title}”.${note} Send me a message to continue it.`);
       return;
     }
+    if (text === "/context") {
+      await telegram.sendMessage(chatId, contextReply(deps));
+      return;
+    }
+    if (text === "/compact") {
+      await telegram.sendMessage(chatId, await compactReply(deps));
+      return;
+    }
     if (text === "/status") {
       await telegram.sendMessage(chatId, await statusReply(deps));
       return;
@@ -206,5 +271,11 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
 
 /** Convenience for the webhook route: the real agent carries services, a runner and activeRuns. */
 export function agentDeps(agent: TalorysAgent): UpdateHandlerDeps {
-  return { services: agent.services, runner: () => agent.runner(), activeRuns: agent.activeRuns, customProviderKey: () => agent.customProviderKey() };
+  return {
+    services: agent.services,
+    runner: () => agent.runner(),
+    activeRuns: agent.activeRuns,
+    customProviderKey: () => agent.customProviderKey(),
+    aiProvider: () => agent.aiProvider(),
+  };
 }

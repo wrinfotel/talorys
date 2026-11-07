@@ -56,6 +56,13 @@ memories and limits as the chat in the web UI:
   Conversations.
 - `/resume` — list the recent conversations; `/resume 2` switches the chat
   back to the second of them, and the next plain message continues it.
+- `/context` — how full the current conversation's context window is: the
+  messages kept verbatim, their estimated tokens against the budget, and the
+  running summary that covers older messages.
+- `/compact` — fold everything but the most recent messages into the running
+  summary right away (one AI call), so long conversations keep answering with
+  full context. Compaction otherwise happens automatically on the next reply
+  when the history no longer fits.
 - `/status` — the model the assistant is running on, and whether web search
   and notifications are on.
 - `/help` — a short summary of what the bot can do.

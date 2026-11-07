@@ -70,6 +70,8 @@ beforeEach(async () => {
     agent.services.db.run(`DELETE FROM tal_messages`);
     agent.services.db.run(`DELETE FROM tal_conversations`);
     agent.services.db.run(`DELETE FROM tal_activity`);
+    // Quota counters are daily and would otherwise leak into later tests in the same store.
+    agent.services.db.run(`DELETE FROM tal_usage_daily`);
   });
 });
 
@@ -218,6 +220,74 @@ describe("telegram owner chat", () => {
       await processUpdate(agentDeps(agent), update("hello again"));
       expect(agent.services.conversations.messages(older.id).some((m) => m.role === "user" && m.content === "hello again")).toBe(true);
       expect(agent.services.conversations.messages(newer.id).some((m) => m.content === "hello again")).toBe(false);
+    });
+  });
+
+  it("/context and /compact report and shrink the current conversation's context", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      const conv = agent.services.conversations.create("Long chat");
+      agent.services.telegram.rememberConversation(conv.id);
+      for (let i = 0; i < 12; i++) {
+        agent.services.conversations.addMessage({ conversation_id: conv.id, role: "user", content: `question number ${i}` });
+        agent.services.conversations.addMessage({ conversation_id: conv.id, role: "assistant", content: `answer number ${i}` });
+      }
+      // Instant inserts can share one millisecond; distinct times make the summary boundary strict.
+      const history = agent.services.conversations.messages(conv.id);
+      for (const [i, m] of history.entries()) {
+        agent.services.db.run(`UPDATE tal_messages SET created_at = ? WHERE id = ?`, new Date(Date.parse("2026-11-07T12:00:00.000Z") + i * 60_000).toISOString(), m.id);
+      }
+
+      await processUpdate(agentDeps(agent), update("/context"));
+      expect(replies(api)[0]).toContain("Context of “Long chat”");
+      expect(replies(api)[0]).toContain("24 of 24 messages");
+      expect(replies(api)[0]).toContain("Summary: none yet");
+
+      await processUpdate(agentDeps(agent), update("/compact"));
+      expect(replies(api)[1]).toContain("Compacted: 18 messages folded into the summary.");
+      expect(replies(api)[1]).toContain("The window is now 6 messages");
+      expect(agent.services.conversations.get(conv.id)!.summary).toBeTruthy();
+
+      await processUpdate(agentDeps(agent), update("/context"));
+      expect(replies(api)[2]).toContain("6 of 24 messages");
+      expect(replies(api)[2]).toContain("Summary: ");
+    });
+  });
+
+  it("/context and /compact speak up when there is nothing to report", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      await processUpdate(agentDeps(agent), update("/context"));
+      expect(replies(api)[0]).toContain("No conversation is going on in this chat yet");
+      await processUpdate(agentDeps(agent), update("/compact"));
+      expect(replies(api)[1]).toContain("No conversation is going on in this chat yet");
+
+      const conv = agent.services.conversations.create("Short");
+      agent.services.telegram.rememberConversation(conv.id);
+      agent.services.conversations.addMessage({ conversation_id: conv.id, role: "user", content: "hi" });
+      await processUpdate(agentDeps(agent), update("/compact"));
+      expect(replies(api)[2]).toBe("Nothing to compact — this conversation is short and fits comfortably.");
+    });
+  });
+
+  it("/compact refuses while the conversation is busy and without daily AI budget", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      const conv = agent.services.conversations.create("Chat");
+      agent.services.telegram.rememberConversation(conv.id);
+
+      agent.activeRuns.set(conv.id, new AbortController());
+      await processUpdate(agentDeps(agent), update("/compact"));
+      expect(replies(api)[0]).toBe("I'm still answering your previous message — one at a time for now.");
+      agent.activeRuns.delete(conv.id);
+
+      const limits = agent.services.settings.get().limits;
+      agent.services.usage.increment({ ai_requests: limits.maxAiRequestsPerDay });
+      await processUpdate(agentDeps(agent), update("/compact"));
+      expect(replies(api)[1]).toContain("daily AI limit");
     });
   });
 

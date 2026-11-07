@@ -108,6 +108,8 @@ describe("telegram service", () => {
       expect(api.sent[2]!.body.commands).toEqual([
         { command: "new", description: "Start a fresh conversation" },
         { command: "resume", description: "Continue a recent conversation" },
+        { command: "context", description: "How full the conversation's context is" },
+        { command: "compact", description: "Fold older messages into the summary" },
         { command: "status", description: "Model, web search and notifications" },
         { command: "help", description: "What this bot can do" },
       ]);

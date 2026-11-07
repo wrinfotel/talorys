@@ -48,6 +48,8 @@ const PAIRING_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const BOT_COMMANDS = [
   { command: "new", en: "Start a fresh conversation", ru: "Начать новый диалог" },
   { command: "resume", en: "Continue a recent conversation", ru: "Вернуться к недавнему диалогу" },
+  { command: "context", en: "How full the conversation's context is", ru: "Заполненность контекста диалога" },
+  { command: "compact", en: "Fold older messages into the summary", ru: "Сжать историю в краткую выжимку" },
   { command: "status", en: "Model, web search and notifications", ru: "Модель, поиск и уведомления" },
   { command: "help", en: "What this bot can do", ru: "Что умеет этот бот" },
 ] as const;
@@ -56,7 +58,7 @@ const BOT_COMMANDS = [
  * Bumped whenever BOT_COMMANDS changes: bots whose stored menu version differs re-register
  * on their next message, so already-connected bots pick up new commands without reconnecting.
  */
-const COMMANDS_VERSION = "2";
+const COMMANDS_VERSION = "3";
 
 /** Plain text for a Telegram message, mirroring `toPushMessage`: Markdown markers stripped, spaces collapsed. */
 export function telegramNotificationText(n: Pick<Notification, "title" | "body">): string {
