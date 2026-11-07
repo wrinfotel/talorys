@@ -1,7 +1,9 @@
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ChatStreamEvent } from "@talorys/shared";
 import type { TalorysAgent } from "../src/agent/talorys-agent";
 import type { AgentRunner } from "../src/agent/runner";
+import { SecretBox } from "../src/services/secret-box";
 import { agentDeps, processUpdate, type TelegramUpdate } from "../src/telegram/handler";
 import { inAgent } from "./helpers";
 
@@ -145,7 +147,59 @@ describe("telegram owner chat", () => {
 
       await processUpdate(agentDeps(agent), update("/help"));
       expect(replies(api)[1]).toContain("/new");
+      expect(replies(api)[1]).toContain("/status");
       expect(replies(api)[1]).toContain("/help");
+    });
+  });
+
+  it("/status reports the model, web search and notification state", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      const t = agent.services.telegram;
+      t.setPaired(CHAT);
+      await processUpdate(agentDeps(agent), update("/status"));
+      expect(replies(api)[0]).toContain("Cloudflare Workers AI (the built-in free model)");
+      expect(replies(api)[0]).toContain("Web search: built-in (no API key)");
+      expect(replies(api)[0]).toContain("Notifications to this chat: on");
+
+      await t.setNotifyEnabled(false);
+      await processUpdate(agentDeps(agent), update("/status"));
+      expect(replies(api)[1]).toContain("Notifications to this chat: off");
+
+      // A custom provider with a readable key shows the model name.
+      const key = (env as unknown as { MCP_CREDENTIAL_KEY: string }).MCP_CREDENTIAL_KEY;
+      const box = new SecretBox(key, "ai-provider");
+      agent.services.settings.setJson("ai.credentials", { credential: await box.encrypt("key", "sk-or-test") });
+      agent.services.settings.update({ aiProvider: { baseUrl: "https://openrouter.ai/api/v1", model: "openai/gpt-4o-mini" } });
+      await processUpdate(agentDeps(agent), update("/status"));
+      expect(replies(api)[2]).toContain("Model: openai/gpt-4o-mini (your custom provider)");
+
+      // An unreadable key (e.g. a rotated deployment secret) names the fix instead.
+      agent.services.settings.setJson("ai.credentials", { credential: "v1.garbage" });
+      await processUpdate(agentDeps(agent), update("/status"));
+      expect(replies(api)[3]).toContain("the API key is unreadable, save it again in Settings → AI");
+    });
+  });
+
+  it("registers the / command menu on the first owner message when connect missed it", async () => {
+    await inAgent(async (agent) => {
+      let menuFails = true;
+      const api = botApi((call) => {
+        if (call.url.endsWith("/getMe")) return { ok: true, result: { id: 1, username: "talorys_bot" } };
+        if (call.url.endsWith("/setMyCommands")) return menuFails ? { ok: false, description: "Busy" } : { ok: true, result: true };
+        return { ok: true, result: true };
+      });
+      agent.services.telegram.fetcher = api.fetcher;
+      await agent.services.telegram.connect(TOKEN, "https://me.pages.dev"); // menu registration fails here
+      agent.services.telegram.setPaired(CHAT);
+
+      // Telegram recovered; the next message registers the menu in the background.
+      menuFails = false;
+      await processUpdate(agentDeps(agent), update("hello there"));
+      await agent.services.telegram.idle();
+      expect(api.sent.filter((c) => c.url.endsWith("/setMyCommands"))).toHaveLength(3); // 1 failed at connect + 2 now
+      expect(agent.services.telegram.commandsRegistered()).toBe(true);
+      expect(agent.services.telegram.conversationId()).toEqual(expect.any(String));
     });
   });
 

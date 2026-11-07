@@ -19,6 +19,8 @@ export interface UpdateHandlerDeps {
   runner: () => Promise<AgentRunner>;
   /** In-flight chat turns keyed by conversation id, as in the web chat routes. */
   activeRuns: Map<string, AbortController>;
+  /** Resolves to the stored custom-provider API key (null when absent or unreadable); the real agent satisfies this. */
+  customProviderKey?: () => Promise<string | null>;
 }
 
 const PAIRED_REPLY = "Paired! This chat is now linked to your Talorys agent.";
@@ -30,6 +32,7 @@ const NEW_CONVERSATION_REPLY = "Started a new conversation.";
 const HELP_REPLY = [
   "You can send me messages in plain text — I answer like the chat in Talorys, with the same tools and memories.",
   "/new — start a fresh conversation (the old one stays in Talorys).",
+  "/status — the model I'm running on, and whether web search and notifications are on.",
   "/help — this text.",
   "Reminders and automation results are also delivered to this chat while notifications are on.",
 ].join("\n");
@@ -38,6 +41,26 @@ const FAILED_REPLY = "Something went wrong.";
 
 /** One-time pairing codes: 8 characters from the digits-and-uppercase alphabet. */
 const PAIRING_CODE = /^\/start\s+([A-Z2-9]{8})$/;
+
+/** The "/status" answer: what the assistant is running on, in the same voice as the web UI. */
+async function statusReply(deps: UpdateHandlerDeps): Promise<string> {
+  const custom = deps.services.settings.get().aiProvider;
+  let model = "Cloudflare Workers AI (the built-in free model)";
+  if (custom) {
+    const readable = deps.customProviderKey ? (await deps.customProviderKey()) !== null : true;
+    model = readable
+      ? `${custom.model} (your custom provider)`
+      : `${custom.model} (custom provider — the API key is unreadable, save it again in Settings → AI)`;
+  }
+  const search = (await deps.services.webSearch.apiKey()) ? "Tavily" : "built-in (no API key)";
+  const notifications = (await deps.services.telegram.status()).notify_enabled === true ? "on" : "off";
+  return [
+    "Here's how I'm set up:",
+    `• Model: ${model}`,
+    `• Web search: ${search}`,
+    `• Notifications to this chat: ${notifications}`,
+  ].join("\n");
+}
 
 /**
  * Handles one Telegram webhook update. Telegram already got its 200 by the time this runs, so
@@ -71,10 +94,16 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
       return;
     }
 
-    // 3. Owner commands.
+    // 3. Owner commands. The "/" menu above the keyboard is registered in the background
+    //    when needed, so bots connected before the menu existed pick it up on this message.
+    telegram.ensureCommandsInBackground();
     if (text === "/new") {
       telegram.forgetConversation();
       await telegram.sendMessage(chatId, NEW_CONVERSATION_REPLY);
+      return;
+    }
+    if (text === "/status") {
+      await telegram.sendMessage(chatId, await statusReply(deps));
       return;
     }
     if (text === "/help") {
@@ -130,5 +159,5 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
 
 /** Convenience for the webhook route: the real agent carries services, a runner and activeRuns. */
 export function agentDeps(agent: TalorysAgent): UpdateHandlerDeps {
-  return { services: agent.services, runner: () => agent.runner(), activeRuns: agent.activeRuns };
+  return { services: agent.services, runner: () => agent.runner(), activeRuns: agent.activeRuns, customProviderKey: () => agent.customProviderKey() };
 }

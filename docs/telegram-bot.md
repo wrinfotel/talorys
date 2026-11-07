@@ -54,7 +54,17 @@ memories and limits as the chat in the web UI:
   web chat (it is the same conversation) and the Telegram reply stops too.
 - `/new` — start a fresh conversation. The old one remains in Talorys under
   Conversations.
+- `/status` — the model the assistant is running on, and whether web search
+  and notifications are on.
 - `/help` — a short summary of what the bot can do.
+
+### The "/" command menu
+
+Connecting the bot also registers its commands with Telegram, so the menu
+button next to the message field lists them: in English by default, and in
+Russian when the Telegram app's language is Russian. A bot that was connected
+before this feature existed picks the menu up on its next message in the
+paired chat; disconnecting and connecting again registers it too.
 
 ## Notifications
 

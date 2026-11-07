@@ -1,4 +1,4 @@
-import { SecretBox } from "./secret-box";
+import type { SecretBox } from "./secret-box";
 import type { SettingsService } from "./settings";
 
 const CREDENTIALS_KEY = "web-search.credentials";

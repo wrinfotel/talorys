@@ -9,6 +9,8 @@ interface TelegramConfig {
   webhook_base_url: string;
   allowed_chat_id: number | null;
   notify_enabled: boolean;
+  /** True once the "/" command menu was accepted by Telegram; optional so pre-menu configs parse. */
+  commands_registered?: boolean;
 }
 
 /** Token and webhook secret at rest, both SecretBox ciphertexts bound to their context ids. */
@@ -41,6 +43,13 @@ const NOTIFY_BODY_LIMIT = 3500;
 
 /** Code alphabet without 0/1/I/O, so a misread digit can't point at another valid code. */
 const PAIRING_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/** The "/" menu Telegram shows above the keyboard: English by default, Russian for ru clients. */
+const BOT_COMMANDS = [
+  { command: "new", en: "Start a fresh conversation", ru: "Начать новый диалог" },
+  { command: "status", en: "Model, web search and notifications", ru: "Модель, поиск и уведомления" },
+  { command: "help", en: "What this bot can do", ru: "Что умеет этот бот" },
+] as const;
 
 /** Plain text for a Telegram message, mirroring `toPushMessage`: Markdown markers stripped, spaces collapsed. */
 export function telegramNotificationText(n: Pick<Notification, "title" | "body">): string {
@@ -182,6 +191,7 @@ export class TelegramService {
       allowed_chat_id: null,
       notify_enabled: true,
     });
+    await this.ensureCommands();
     this.issuePairing();
     return this.status();
   }
@@ -223,6 +233,44 @@ export class TelegramService {
     const config = this.config();
     if (!config) return;
     this.settings.setJson(CONFIG_KEY, { ...config, notify_enabled: enabled });
+  }
+
+  /** True once Telegram accepted the "/" command menu for this connection. */
+  commandsRegistered(): boolean {
+    return this.config()?.commands_registered === true;
+  }
+
+  /**
+   * Registers the "/" menu in the background when it isn't registered yet, so bots connected
+   * before the menu existed pick it up on their next message instead of reconnecting.
+   * Registration failures only delay the menu; they never touch the update being handled.
+   */
+  ensureCommandsInBackground(): void {
+    if (this.commandsRegistered()) return;
+    const work: Promise<void> = this.ensureCommands().finally(() => this.pending.delete(work));
+    this.pending.add(work);
+    this.background(work);
+  }
+
+  private async ensureCommands(): Promise<void> {
+    const config = this.config();
+    if (!config || config.commands_registered) return;
+    try {
+      await this.setCommands();
+    } catch (error) {
+      console.warn("Telegram command menu registration failed", error instanceof Error ? error.message : String(error));
+      return;
+    }
+    this.settings.setJson(CONFIG_KEY, { ...config, commands_registered: true });
+  }
+
+  /** Two setMyCommands calls: the English default, then the Russian override for ru clients. */
+  private async setCommands(): Promise<void> {
+    const token = await this.token();
+    if (!token) return;
+    const commands = (lang: "en" | "ru") => BOT_COMMANDS.map(({ command, en, ru }) => ({ command, description: lang === "ru" ? ru : en }));
+    await this.apiCall(token, "setMyCommands", { commands: commands("en") });
+    await this.apiCall(token, "setMyCommands", { commands: commands("ru"), language_code: "ru" });
   }
 
   async status(): Promise<TelegramStatus> {

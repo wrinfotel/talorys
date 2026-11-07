@@ -93,6 +93,8 @@ describe("telegram service", () => {
       expect(api.sent.map((c) => c.url)).toEqual([
         "https://api.telegram.org/bot123456:AAQ-example-token_abcdef/getMe",
         "https://api.telegram.org/bot123456:AAQ-example-token_abcdef/setWebhook",
+        "https://api.telegram.org/bot123456:AAQ-example-token_abcdef/setMyCommands",
+        "https://api.telegram.org/bot123456:AAQ-example-token_abcdef/setMyCommands",
       ]);
       expect(api.sent[1]!.body).toMatchObject({
         url: "https://me.pages.dev/api/telegram/webhook",
@@ -102,6 +104,15 @@ describe("telegram service", () => {
       // Telegram only accepts secrets from [-_A-Za-z0-9]; randomToken is base64url, 43 characters.
       const secret = api.sent[1]!.body.secret_token as string;
       expect(secret).toMatch(/^[-_A-Za-z0-9]{1,256}$/);
+      // The "/" command menu: English by default, then the Russian client override.
+      expect(api.sent[2]!.body.commands).toEqual([
+        { command: "new", description: "Start a fresh conversation" },
+        { command: "status", description: "Model, web search and notifications" },
+        { command: "help", description: "What this bot can do" },
+      ]);
+      expect(api.sent[3]!.body).toMatchObject({ language_code: "ru" });
+      expect((api.sent[3]!.body.commands as { description: string }[]).some((c) => c.description.includes("диалог"))).toBe(true);
+      expect(t.commandsRegistered()).toBe(true);
       expect(status).toMatchObject({
         connected: true,
         bot_username: "talorys_bot",
@@ -128,6 +139,42 @@ describe("telegram service", () => {
       await expect(t.connect("999:bad", "https://me.pages.dev")).rejects.toThrow("Unauthorized");
       expect(agent.services.settings.getJson("telegram.secrets")).toBeNull();
       expect(agent.services.settings.getJson("telegram.config")).toBeNull();
+    });
+  });
+
+  it("a failed menu registration still connects, and a later message retries it once", async () => {
+    await inAgent(async (agent) => {
+      let menuFails = true;
+      const api = botApi((call) => {
+        if (call.url.endsWith("/getMe")) return { ok: true, result: { id: 1, username: "talorys_bot" } };
+        if (call.url.endsWith("/setMyCommands")) return menuFails ? { ok: false, description: "Busy" } : { ok: true, result: true };
+        return { ok: true, result: true };
+      });
+      const t = makeTelegram(agent, api.fetcher);
+      await expect(t.connect(TOKEN, "https://me.pages.dev")).resolves.toMatchObject({ connected: true });
+      expect(t.commandsRegistered()).toBe(false);
+
+      // Telegram recovered: the next owner message registers the menu in the background.
+      menuFails = false;
+      t.ensureCommandsInBackground();
+      await t.idle();
+      expect(api.sent.filter((c) => c.url.endsWith("/setMyCommands"))).toHaveLength(3); // 1 failed at connect + 2 now
+      expect(t.commandsRegistered()).toBe(true);
+
+      // Registered bots don't re-register on later messages.
+      t.ensureCommandsInBackground();
+      await t.idle();
+      expect(api.sent.filter((c) => c.url.endsWith("/setMyCommands"))).toHaveLength(3);
+    });
+  });
+
+  it("does not register the menu while the bot is not connected", async () => {
+    await inAgent(async (agent) => {
+      const api = happy();
+      const t = makeTelegram(agent, api.fetcher);
+      t.ensureCommandsInBackground();
+      await t.idle();
+      expect(api.sent.filter((c) => c.url.endsWith("/setMyCommands"))).toHaveLength(0);
     });
   });
 
