@@ -5,6 +5,7 @@ import { AppError, NotFoundError } from "../api/errors";
 import { ALL_TOOLS, ToolExecutor, type ToolDefinition } from "../tools";
 import { clip } from "../services/text";
 import { buildSystemPrompt } from "./prompt";
+import { stripToolMarkup, withLeakedToolRecovery } from "./leaked-tools";
 import { SUMMARIZE_THRESHOLD, buildContextWindow, memoryTokenBudget, selectRelevantMemories, summarizationPrompt } from "./memory";
 import type { RunnerExtensions } from "../semantic/hooks";
 
@@ -224,7 +225,7 @@ export class AgentRunner {
         id: assistantId,
         conversation_id: conversation!.id,
         role: "assistant",
-        content: text,
+        content: stripToolMarkup(text),
         tools,
         status,
         error,
@@ -305,7 +306,7 @@ export class AgentRunner {
 
       // Memory selection and summarizing may have spent budget since the first check.
       if (!s.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
-      for await (const event of this.provider.generateWithTools({
+      for await (const event of withLeakedToolRecovery(this.provider, {
         system,
         messages: window.messages,
         tools: providerTools,
@@ -351,6 +352,7 @@ export class AgentRunner {
         yield { type: "done", message: finish("cancelled", null) };
         return;
       }
+      text = stripToolMarkup(text);
       if (!text.trim()) {
         text = tools.some((t) => t.plan)
           ? "I've proposed a plan for you to review. Nothing is created until you confirm it."
@@ -377,7 +379,7 @@ export class AgentRunner {
     const executor = new ToolExecutor(
       this.ext?.tools ?? ALL_TOOLS,
       { services: s, timezone: settings.timezone, mode: "scheduled" },
-      { maxToolCalls: Math.min(settings.limits.maxToolCalls, 4) },
+      { maxToolCalls: Math.min(settings.limits.maxToolCalls, 10) },
     );
     const system = buildSystemPrompt({
       agentName: settings.agentName,
@@ -395,11 +397,11 @@ export class AgentRunner {
     // Reserved after the awaits above, so a run started just before the budget ran out cannot overrun it.
     if (!s.usage.reserveScheduledAi(settings.limits)) throw aiLimitReached(settings.limits.maxAiRequestsPerDay);
     try {
-      for await (const event of this.provider.generateWithTools({
+      for await (const event of withLeakedToolRecovery(this.provider, {
         system,
         messages: [{ role: "user", content: prompt }],
         tools: providerTools,
-        maxIterations: Math.min(settings.limits.maxAgentIterations, 3),
+        maxIterations: Math.min(settings.limits.maxAgentIterations, 10),
         maxOutputTokens: Math.min(settings.limits.maxOutputTokens, 600),
         temperature: settings.temperature,
         toolBudgetExhausted: () => executor.budgetExhausted(),
@@ -416,7 +418,7 @@ export class AgentRunner {
       throw classifyAiError(error);
     }
     s.usage.increment({ tool_calls: executor.callCount });
-    return text.trim() || "(No output)";
+    return stripToolMarkup(text).trim() || "(No output)";
   }
 }
 
