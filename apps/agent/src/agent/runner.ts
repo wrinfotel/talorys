@@ -396,6 +396,9 @@ export class AgentRunner {
     let text = "";
     // Reserved after the awaits above, so a run started just before the budget ran out cannot overrun it.
     if (!s.usage.reserveScheduledAi(settings.limits)) throw aiLimitReached(settings.limits.maxAiRequestsPerDay);
+    // Whether the per-round budget ran out mid-run: without this flag the run would end
+    // "(No output)", indistinguishable from a model that never wrote prose.
+    let budgetStarved = false;
     try {
       for await (const event of withLeakedToolRecovery(this.provider, {
         system,
@@ -407,7 +410,11 @@ export class AgentRunner {
         maxOutputTokens: Math.min(settings.limits.maxOutputTokens, 2000),
         temperature: settings.temperature,
         toolBudgetExhausted: () => executor.budgetExhausted(),
-        reserveNextStep: () => s.usage.reserveAi(settings.limits),
+        reserveNextStep: () => {
+          const ok = s.usage.reserveAi(settings.limits);
+          if (!ok) budgetStarved = true;
+          return ok;
+        },
         signal,
       })) {
         if (event.type === "text") text += event.delta;
@@ -420,7 +427,10 @@ export class AgentRunner {
       throw classifyAiError(error);
     }
     s.usage.increment({ tool_calls: executor.callCount });
-    return stripToolMarkup(text).trim() || "(No output)";
+    return (
+      stripToolMarkup(text).trim() ||
+      (budgetStarved ? "Stopped mid-run: the daily AI budget ran out. Adjust it in Settings → AI." : "(No output)")
+    );
   }
 }
 
