@@ -225,6 +225,15 @@ export function stripToolMarkup(text: string): string {
 const MAX_RECOVERY_ROUNDS = 2;
 
 /**
+ * Scheduled-run diagnostics: console output from the DO is the only visibility into
+ * why a run came back empty (Workers observability keeps it), so every decision the
+ * recovery makes gets one line.
+ */
+function slog(...parts: unknown[]): void {
+  console.log("[sched]", ...parts);
+}
+
+/**
  * Runs a provider tool turn and repairs the failure modes above: when a round's
  * text contains parseable tool calls, they are executed through the request's
  * own tools (same limits, validations and activity events as structured calls),
@@ -237,6 +246,7 @@ export async function* withLeakedToolRecovery(provider: AIProvider, req: ToolReq
   // Results the model can answer from, across every round: structured calls executed
   // inside the provider loop and leaked calls executed here.
   const collected: string[] = [];
+  slog(`start provider=${provider.id}/${provider.model} tools=${req.tools.length} maxIter=${req.maxIterations} cap=${req.maxOutputTokens}`);
   for (let round = 0; ; round++) {
     let text = "";
     for await (const event of provider.generateWithTools({ ...req, messages })) {
@@ -244,10 +254,12 @@ export async function* withLeakedToolRecovery(provider: AIProvider, req: ToolReq
       if (event.type === "tool-end") collected.push(renderToolResult(event.name, event.output, event.error));
       yield event;
     }
+    slog(`round ${round} done textLen=${text.length} collected=${collected.length}`);
     if (!text.trim()) {
       // The round ended without prose: structured calls only, or a reasoning model that
       // spent its whole token budget thinking before writing any content. One fresh-context
       // chance to compose the answer from the collected results.
+      slog(`round ${round} EMPTY -> fresh-context rescue`);
       yield* freshContextRescue(provider, req, collected);
       return;
     }
@@ -324,7 +336,10 @@ const MAX_RESCUE_ATTEMPTS = 2;
 async function* freshContextRescue(provider: AIProvider, req: ToolRequest, collected: string[]): AsyncGenerator<AgentEvent> {
   const task = [...req.messages].reverse().find((m) => m.role === "user" && m.content.trim())?.content;
   for (let attempt = 0; attempt < MAX_RESCUE_ATTEMPTS; attempt++) {
-    if (req.reserveNextStep && !req.reserveNextStep()) return;
+    if (req.reserveNextStep && !req.reserveNextStep()) {
+      slog(`rescue attempt ${attempt + 1} skipped: no budget`);
+      return;
+    }
     const rescue: ModelMessage[] = [
       {
         role: "user",
@@ -341,6 +356,7 @@ async function* freshContextRescue(provider: AIProvider, req: ToolRequest, colle
       if (event.type === "text") text += event.delta;
       yield event;
     }
+    slog(`rescue attempt ${attempt + 1} done textLen=${text.length} clean=${Boolean(stripToolMarkup(text).trim())}`);
     if (stripToolMarkup(text).trim()) return;
   }
 }
