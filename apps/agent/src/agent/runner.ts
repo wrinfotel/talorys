@@ -394,10 +394,6 @@ export class AgentRunner {
     });
     const providerTools = toProviderTools(executor);
     let text = "";
-    const startedAt = Date.now();
-    console.log(
-      `[sched] run start provider=${this.provider.id}/${this.provider.model} temp=${settings.temperature} iters=${Math.min(settings.limits.maxAgentIterations, 10)} cap=${Math.min(settings.limits.maxOutputTokens, 2000)}`,
-    );
     // Reserved after the awaits above, so a run started just before the budget ran out cannot overrun it.
     if (!s.usage.reserveScheduledAi(settings.limits)) throw aiLimitReached(settings.limits.maxAiRequestsPerDay);
     // Whether the per-round budget ran out mid-run: without this flag the run would end
@@ -431,14 +427,10 @@ export class AgentRunner {
       throw classifyAiError(error);
     }
     s.usage.increment({ tool_calls: executor.callCount });
-    const clean = stripToolMarkup(text).trim();
-    const fallback = budgetStarved
-      ? "Stopped mid-run: the daily AI budget ran out. Adjust it in Settings → AI."
-      : "(No output)";
-    console.log(
-      `[sched] run done in ${Date.now() - startedAt}ms textLen=${text.length} cleanLen=${clean.length} toolCalls=${executor.callCount} budgetStarved=${budgetStarved} -> ${clean ? "prose" : fallback}`,
+    return (
+      stripToolMarkup(text).trim() ||
+      (budgetStarved ? "Stopped mid-run: the daily AI budget ran out. Adjust it in Settings → AI." : "(No output)")
     );
-    return clean || fallback;
   }
 }
 
