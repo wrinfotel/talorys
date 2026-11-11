@@ -99,10 +99,11 @@ export class TalorysAgent extends Agent<Env, AgentState> {
     const settings = this.services.settings.get();
     if (settings.demoMode) return new MockAIProvider();
     if (this.env.TALORYS_ENV === "development" && this.env.TALORYS_MOCK_AI === "1") return new MockAIProvider();
-    if (settings.aiProvider) {
+    const custom = settings.aiProvider;
+    if (custom && custom.disabled !== true) {
       const apiKey = await this.customProviderKey();
       if (apiKey === null) return new UnavailableAiProvider();
-      return new OpenAICompatibleProvider({ baseUrl: settings.aiProvider.baseUrl, apiKey, model: settings.aiProvider.model });
+      return new OpenAICompatibleProvider({ baseUrl: custom.baseUrl, apiKey, model: custom.model });
     }
     if (!this.env.AI) return null;
     return new CloudflareWorkersAIProvider(this.env.AI, settings.model);
@@ -122,13 +123,15 @@ export class TalorysAgent extends Agent<Env, AgentState> {
   /**
    * Clef for the memory-history AI check: only with real Workers AI (not mock AI, demo
    * mode or the custom provider — the check keeps using Workers AI's decision model even
-   * when chat runs on another provider). Mirrors `aiProvider()`'s Workers AI branch
-   * synchronously, because the SecretBox decryption makes `aiProvider()` itself async.
+   * when chat runs on another provider). A paused custom config counts as "no custom
+   * provider" here, mirroring `aiProvider()`. Computed synchronously, because the
+   * SecretBox decryption makes `aiProvider()` itself async.
    */
   clefRun(): ClefRun | null {
     if (!this.env.AI) return null;
     const settings = this.services.settings.get();
-    if (settings.demoMode || settings.aiProvider) return null;
+    const custom = settings.aiProvider;
+    if (settings.demoMode || (custom !== undefined && custom.disabled !== true)) return null;
     if (this.env.TALORYS_ENV === "development" && this.env.TALORYS_MOCK_AI === "1") return null;
     const ai = this.env.AI;
     return (request, signal) => ai.run(CLEF_MODEL, { ...request }, { signal });

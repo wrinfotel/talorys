@@ -21,14 +21,18 @@ function credentialBox(env: AppEnv["Bindings"]["env"]): SecretBox {
 async function status(agent: TalorysAgent): Promise<AiProviderStatus> {
   const settings = agent.services.settings.get();
   const custom = settings.aiProvider;
+  const active = custom !== undefined && custom.disabled !== true;
   const hasApiKey = (await agent.customProviderKey()) !== null;
   const parsed = aiProviderStatusSchema.safeParse({
-    kind: custom ? "custom" : "workers-ai",
+    kind: active ? "custom" : "workers-ai",
+    saved: custom !== undefined,
     base_url: custom?.baseUrl ?? null,
     model: custom?.model ?? null,
     has_api_key: hasApiKey,
   });
-  return parsed.success ? parsed.data : { kind: "workers-ai", base_url: null, model: null, has_api_key: false };
+  return parsed.success
+    ? parsed.data
+    : { kind: "workers-ai", saved: false, base_url: null, model: null, has_api_key: false };
 }
 
 aiProviderRoutes.get("/ai-provider", async (c) => c.json(await status(c.env.agent)));
@@ -36,6 +40,16 @@ aiProviderRoutes.get("/ai-provider", async (c) => c.json(await status(c.env.agen
 aiProviderRoutes.put("/ai-provider", async (c) => {
   const input = await body(c, aiProviderUpdateSchema);
   const s = c.env.agent.services;
+  const stored = s.settings.get().aiProvider;
+  if (input.disabled === true) {
+    // Pause, not delete: the config and its stored key survive so the owner can
+    // switch back to the custom provider with a single Save later.
+    if (stored) {
+      s.settings.update({ aiProvider: { baseUrl: input.base_url ?? stored.baseUrl, model: input.model ?? stored.model, disabled: true } });
+    }
+    return c.json(await status(c.env.agent));
+  }
+  if (!input.base_url || !input.model) throw new ValidationError("Base URL and model are required");
   // Changing base URL or model alone is allowed; a first-time setup needs a key.
   if (!input.api_key && !(await c.env.agent.customProviderKey())) {
     throw new ValidationError("API key is required");
@@ -46,7 +60,8 @@ aiProviderRoutes.put("/ai-provider", async (c) => {
     box.assertAvailable();
     s.settings.setJson(CREDENTIAL_KEY, { credential: await box.encrypt("key", input.api_key) });
   }
-  s.settings.update({ aiProvider: { baseUrl: input.base_url, model: input.model } });
+  // disabled: false also re-activates a paused config.
+  s.settings.update({ aiProvider: { baseUrl: input.base_url, model: input.model, disabled: false } });
   return c.json(await status(c.env.agent));
 });
 

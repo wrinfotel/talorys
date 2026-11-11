@@ -333,23 +333,34 @@ export const languagePreferenceSchema = z.enum(["system", ...LANGUAGES]);
 export const customProviderSchema = z.object({
   baseUrl: z.string().trim().url().max(500),
   model: z.string().trim().min(1).max(200),
+  /** true = this config stays stored but chat runs on Workers AI (paused, one-click return). */
+  disabled: z.boolean().optional(),
 });
 export type CustomProvider = z.infer<typeof customProviderSchema>;
 
-export const aiProviderUpdateSchema = z.object({
-  base_url: z.string().trim().url().max(500),
-  model: z.string().trim().min(1).max(200),
+const aiProviderUpdateBase = z.object({
+  base_url: z.string().trim().url().max(500).optional(),
+  model: z.string().trim().min(1).max(200).optional(),
   /** Required when no key is stored yet; optional when only base_url/model change. */
   api_key: z.string().min(1).max(500).optional(),
+  /** true = switch to Workers AI while keeping the custom config and its key stored. */
+  disabled: z.boolean().optional(),
 });
+export const aiProviderUpdateSchema = aiProviderUpdateBase.refine(
+  (v) => v.disabled === true || (v.base_url !== undefined && v.model !== undefined),
+  { message: "base_url and model are required unless switching back to Workers AI" },
+);
 export type AiProviderUpdate = z.infer<typeof aiProviderUpdateSchema>;
 
 /** Test a provider config before saving; any field may come from the unsaved form. */
-export const aiProviderTestSchema = aiProviderUpdateSchema.partial();
+export const aiProviderTestSchema = aiProviderUpdateBase.partial();
 export type AiProviderTest = z.infer<typeof aiProviderTestSchema>;
 
 export const aiProviderStatusSchema = z.object({
+  /** The provider chat actually runs on right now (a saved-but-disabled custom config reports workers-ai). */
   kind: z.enum(["workers-ai", "custom"]),
+  /** true when a custom provider config is stored, even while disabled. */
+  saved: z.boolean(),
   base_url: z.string().nullable(),
   model: z.string().nullable(),
   has_api_key: z.boolean(),

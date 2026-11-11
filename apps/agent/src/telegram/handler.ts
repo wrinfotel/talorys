@@ -130,11 +130,13 @@ async function compactReply(deps: UpdateHandlerDeps): Promise<string> {
 async function statusReply(deps: UpdateHandlerDeps): Promise<string> {
   const custom = deps.services.settings.get().aiProvider;
   let model = "Cloudflare Workers AI (the built-in free model)";
-  if (custom) {
+  if (custom && custom.disabled !== true) {
     const readable = deps.customProviderKey ? (await deps.customProviderKey()) !== null : true;
     model = readable
       ? `${custom.model} (your custom provider)`
       : `${custom.model} (custom provider — the API key is unreadable, save it again in Settings → AI)`;
+  } else if (custom) {
+    model += ` — your custom provider (${custom.model}) stays saved but is paused`;
   }
   const search = (await deps.services.webSearch.apiKey()) ? "Tavily" : "built-in (no API key)";
   const notifications = (await deps.services.telegram.status()).notify_enabled === true ? "on" : "off";

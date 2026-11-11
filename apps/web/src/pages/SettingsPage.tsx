@@ -213,8 +213,10 @@ type ProviderMode = "workers-ai" | "custom";
 /**
  * Chooses between the default Workers AI and a custom OpenAI-compatible provider.
  * The mode and the form fields are local state, not auto-saved: nothing changes on the
- * server until Save (or Disconnect) is pressed. The API key is write-only: the server
- * never returns it, so the field always starts empty.
+ * server until Save is pressed. Switching to Workers AI (Save in the Workers AI row)
+ * pauses the custom provider without deleting anything; only Delete removes the stored
+ * config and key. The API key is write-only: the server never returns it, so the field
+ * always starts empty.
  */
 function ProviderSection({ settings, mode, onModeChange }: { settings: Settings; mode: ProviderMode; onModeChange: (mode: ProviderMode) => void }) {
   const { t } = useI18n();
@@ -223,8 +225,9 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
   const [model, setModel] = useState(settings.aiProvider?.model ?? "");
   const [apiKey, setApiKey] = useState("");
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const customConfigured = !!settings.aiProvider;
+  const customActive = status.data?.kind === "custom";
 
   const changeMode = (next: ProviderMode) => {
     onModeChange(next);
@@ -253,6 +256,16 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
     },
   );
 
+  // Pause, not delete: PUT {disabled} keeps the stored config and key, chat moves to Workers AI.
+  const pauseProvider = useApiMutation(() => api<AiProviderStatus>("/ai-provider", { method: "PUT", body: { disabled: true } }), {
+    invalidate: [keys.settings, keys.aiProvider, keys.usage, keys.system],
+    success: t("aiProvider.workersSaved"),
+    onSuccess: () => {
+      setApiKey("");
+      setTestResult(null);
+    },
+  });
+
   const testProvider = useApiMutation(
     () =>
       api<{ ok: boolean; model?: string; error?: string }>("/ai-provider/test", {
@@ -272,9 +285,9 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
     },
   );
 
-  const disconnect = useApiMutation(() => api<AiProviderStatus>("/ai-provider", { method: "DELETE" }), {
+  const deleteProvider = useApiMutation(() => api<AiProviderStatus>("/ai-provider", { method: "DELETE" }), {
     invalidate: [keys.settings, keys.aiProvider, keys.usage, keys.system],
-    success: t("aiProvider.disconnected"),
+    success: t("aiProvider.deleted"),
     onSuccess: () => {
       onModeChange("workers-ai");
       setApiKey("");
@@ -290,13 +303,13 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
           <option value="custom">{t("aiProvider.modeCustom")}</option>
         </Select>
       </Row>
-      {/* Switching back to Workers AI must not dead-end: without this row the dropdown
-          changes nothing and the only way back (Disconnect) sits inside the hidden
-          custom form. Disconnecting is the server-side switch to the default model. */}
+      {/* The dropdown alone changes nothing server-side; this Save performs the switch to
+          Workers AI. The custom provider stays stored (paused), so returning is one Save
+          in the Custom form — nothing is deleted here. */}
       {mode === "workers-ai" && customConfigured && (
-        <Row label={t("aiProvider.disconnect")} hint={t("aiProvider.switchBackHint")}>
-          <Button variant="outline" onClick={() => setConfirmDisconnect(true)} loading={disconnect.isPending}>
-            {t("aiProvider.disconnect")}
+        <Row label={t("aiProvider.saveWorkers")} hint={customActive ? t("aiProvider.switchToWorkersHint") : t("aiProvider.pausedHint", { model: settings.aiProvider?.model ?? "" })}>
+          <Button variant="outline" disabled={!customActive} loading={pauseProvider.isPending} onClick={() => pauseProvider.mutate(undefined)}>
+            {t("common.save")}
           </Button>
         </Row>
       )}
@@ -328,8 +341,8 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
               <Button variant="ghost" loading={testProvider.isPending} onClick={() => testProvider.mutate(undefined)}>
                 {t("aiProvider.test")}
               </Button>
-              <Button variant="outline" disabled={!customConfigured} onClick={() => setConfirmDisconnect(true)} loading={disconnect.isPending}>
-                {t("aiProvider.disconnect")}
+              <Button variant="ghost" disabled={!customConfigured} onClick={() => setConfirmDelete(true)} loading={deleteProvider.isPending}>
+                {t("aiProvider.delete")}
               </Button>
               <Button disabled={!baseUrl.trim() || !model.trim()} loading={saveProvider.isPending} onClick={() => saveProvider.mutate(undefined)}>
                 {t("common.save")}
@@ -337,16 +350,16 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
             </div>
           </>
         ))}
-      {/* Shared by both switch-back paths: the row above (Workers AI selected while a
-          custom provider is active) and Disconnect inside the custom form. */}
+      {/* Only "Delete" removes the stored config and key; the Workers AI Save above pauses
+          instead — this dialog must never be reachable from the pause path. */}
       <ConfirmDialog
-        open={confirmDisconnect}
-        title={t("aiProvider.disconnectTitle")}
-        message={t("aiProvider.disconnectMessage")}
-        confirmLabel={t("aiProvider.disconnect")}
-        onCancel={() => setConfirmDisconnect(false)}
-        onConfirm={() => disconnect.mutate(undefined)}
-        loading={disconnect.isPending}
+        open={confirmDelete}
+        title={t("aiProvider.deleteTitle")}
+        message={t("aiProvider.deleteMessage")}
+        confirmLabel={t("aiProvider.delete")}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => deleteProvider.mutate(undefined)}
+        loading={deleteProvider.isPending}
       />
     </Section>
   );

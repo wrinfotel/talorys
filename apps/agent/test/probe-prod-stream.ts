@@ -7,7 +7,7 @@
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { streamText, type ToolSet } from "ai";
 import { buildSystemPrompt } from "../src/agent/prompt";
-import { ALL_TOOLS } from "../src/tools";
+import { ALL_TOOLS, type ToolDefinition } from "../src/tools";
 
 const NEWS_TASK =
   "Ежедневные новости AI-рынка: собери топ новостей за сегодня и коротко резюмируй каждую (2-3 предложения).";
@@ -17,10 +17,13 @@ function stubTools(): ToolSet {
   const tools: ToolSet = {};
   const real = process.env.PROBE_REAL_TOOLS === "1";
   for (const t of ALL_TOOLS) {
+    // tools/index.ts casts ALL_TOOLS to ToolDefinition[], dropping the inline executors
+    // from the type; they still exist at runtime for tools that define one.
+    const realExecute = (t as ToolDefinition & { execute?: ToolSet[string]["execute"] }).execute;
     tools[t.name] = {
       description: t.description,
       inputSchema: t.input,
-      execute: real ? t.execute : async () => ({ stub: true, note: "probe stub result" }),
+      execute: real && realExecute ? realExecute : async () => ({ stub: true, note: "probe stub result" }),
     } as ToolSet[string];
   }
   return tools;

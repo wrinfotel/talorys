@@ -46,7 +46,7 @@ describe("ai-provider routes", () => {
   it("PUT stores the provider and an encrypted key; GET reports status without key material", async () => {
     const c = await loggedIn();
     const status = await c.json("/api/ai-provider", { method: "PUT", body: { base_url: BASE_URL, model: MODEL, api_key: API_KEY } });
-    expect(status).toEqual({ kind: "custom", base_url: BASE_URL, model: MODEL, has_api_key: true });
+    expect(status).toEqual({ kind: "custom", saved: true, base_url: BASE_URL, model: MODEL, has_api_key: true });
 
     // GET reports the same status and never the key.
     expect(await c.json("/api/ai-provider")).toEqual(status);
@@ -94,7 +94,7 @@ describe("ai-provider routes", () => {
     const c = await loggedIn();
     await c.json("/api/ai-provider", { method: "PUT", body: { base_url: BASE_URL, model: MODEL, api_key: API_KEY } });
     const status = await c.json("/api/ai-provider", { method: "DELETE" });
-    expect(status).toEqual({ kind: "workers-ai", base_url: null, model: null, has_api_key: false });
+    expect(status).toEqual({ kind: "workers-ai", saved: false, base_url: null, model: null, has_api_key: false });
     await inAgent(async (agent) => {
       expect(agent.services.settings.get().aiProvider).toBeUndefined();
       expect((await settingsRows(agent)).some((r) => r.key === "ai.credentials")).toBe(false);
@@ -104,7 +104,36 @@ describe("ai-provider routes", () => {
 
   it("GET on a default deployment reports Workers AI", async () => {
     const c = await loggedIn();
-    expect(await c.json("/api/ai-provider")).toEqual({ kind: "workers-ai", base_url: null, model: null, has_api_key: false });
+    expect(await c.json("/api/ai-provider")).toEqual({ kind: "workers-ai", saved: false, base_url: null, model: null, has_api_key: false });
+  });
+
+  it("PUT {disabled:true} pauses without deleting: config and key survive, chat runs on Workers AI", async () => {
+    const c = await loggedIn();
+    await c.json("/api/ai-provider", { method: "PUT", body: { base_url: BASE_URL, model: MODEL, api_key: API_KEY } });
+    const status = await c.json("/api/ai-provider", { method: "PUT", body: { disabled: true } });
+    expect(status).toEqual({ kind: "workers-ai", saved: true, base_url: BASE_URL, model: MODEL, has_api_key: true });
+    await inAgent(async (agent) => {
+      // The stored config and the encrypted credential are both still there.
+      const stored = agent.services.settings.get().aiProvider;
+      expect(stored).toMatchObject({ baseUrl: BASE_URL, model: MODEL, disabled: true });
+      expect((await settingsRows(agent)).some((r) => r.key === "ai.credentials")).toBe(true);
+      // The chat provider choice mirrors the status: paused config = Workers AI.
+      await withMockAi(agent, async (a) => expect(await a.aiProvider()).toBeInstanceOf(CloudflareWorkersAIProvider));
+    });
+    // A plain Save (no api_key needed — the key is still stored) re-activates the custom provider.
+    const revived = await c.json("/api/ai-provider", { method: "PUT", body: { base_url: BASE_URL, model: MODEL } });
+    expect(revived).toEqual({ kind: "custom", saved: true, base_url: BASE_URL, model: MODEL, has_api_key: true });
+    await inAgent(async (agent) => {
+      expect(agent.services.settings.get().aiProvider).toMatchObject({ baseUrl: BASE_URL, model: MODEL, disabled: false });
+      await withMockAi(agent, async (a) => expect(connectedProvider(await a.aiProvider())).toBe(true));
+      await c.json("/api/ai-provider", { method: "DELETE" });
+    });
+  });
+
+  it("PUT {disabled:true} without any stored config is a harmless no-op", async () => {
+    const c = await loggedIn();
+    const status = await c.json("/api/ai-provider", { method: "PUT", body: { disabled: true } });
+    expect(status).toEqual({ kind: "workers-ai", saved: false, base_url: null, model: null, has_api_key: false });
   });
 
   it("POST /test probes connectivity with the submitted config, spending no budget", async () => {
@@ -168,6 +197,16 @@ describe("ai provider selection", () => {
         expect(provider!.model).toBe(MODEL);
         expect(provider!.billable).toBe(true);
       });
+      agent.services.settings.update({ aiProvider: null });
+      agent.services.settings.delete("ai.credentials");
+    });
+  });
+
+  it("a disabled (paused) provider falls back to Workers AI like no provider at all", async () => {
+    await inAgent(async (agent) => {
+      agent.services.settings.update({ aiProvider: { baseUrl: BASE_URL, model: MODEL, disabled: true } });
+      await storeCredential(agent);
+      await withMockAi(agent, async (a) => expect(await a.aiProvider()).toBeInstanceOf(CloudflareWorkersAIProvider));
       agent.services.settings.update({ aiProvider: null });
       agent.services.settings.delete("ai.credentials");
     });
