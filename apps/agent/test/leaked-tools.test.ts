@@ -275,7 +275,7 @@ describe("withLeakedToolRecovery", () => {
     expect(texts).toContain("Свежие новости: релиз модели Y.");
   });
 
-  it("does not rescue when a textless round had no results to answer from", async () => {
+  it("retries a textless round with no results in a fresh context", async () => {
     const req: ToolRequest = {
       system: "s",
       messages: [{ role: "user", content: "hi" }],
@@ -285,8 +285,18 @@ describe("withLeakedToolRecovery", () => {
       toolBudgetExhausted: () => false,
       reserveNextStep: () => true,
     };
-    const { provider, requests } = stubProvider([{ text: "" }]);
-    for await (const _event of withLeakedToolRecovery(provider, req)) void _event;
-    expect(requests.length).toBe(1);
+    // Degenerate completions (a token of reasoning, no content) are transient on some
+    // free routes: the rescue retries the bare task in a fresh conversation.
+    const { provider, requests } = stubProvider([{ text: "" }, { text: "Вот ответ." }]);
+    const events: AgentEvent[] = [];
+    for await (const event of withLeakedToolRecovery(provider, req)) events.push(event);
+    expect(requests.length).toBe(2);
+    const rescue = requests[1];
+    expect(rescue?.tools).toEqual([]);
+    const content = String(rescue?.messages[0]?.content);
+    expect(content).toContain("hi");
+    expect(content).not.toContain("Tool results already collected");
+    const texts = events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
+    expect(texts).toContain("Вот ответ.");
   });
 });

@@ -185,7 +185,7 @@ describe("prompt-injection and destructive-action defenses", () => {
     const toolEnds = events.filter((e) => e.type === "tool" && e.tool.status !== "running");
     expect(toolEnds.filter((e: any) => e.tool.status === "success")).toHaveLength(2);
     expect(toolEnds.filter((e: any) => e.tool.status === "error").length).toBeGreaterThan(0);
-    expect(provider.calls[0]!.maxIterations).toBe(4);
+    expect(provider.calls[0]!.maxIterations).toBe(8);
     await (await loggedIn()).call("/api/settings", { method: "PATCH", body: { limits: { maxToolCalls: 6 } } });
   });
 });
