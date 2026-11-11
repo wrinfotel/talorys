@@ -402,7 +402,9 @@ export class AgentRunner {
         messages: [{ role: "user", content: prompt }],
         tools: providerTools,
         maxIterations: Math.min(settings.limits.maxAgentIterations, 10),
-        maxOutputTokens: Math.min(settings.limits.maxOutputTokens, 600),
+        // Generous per-round cap: reasoning models spend output tokens thinking before
+        // any content, and a tight cap turns a scheduled run into "(No output)".
+        maxOutputTokens: Math.min(settings.limits.maxOutputTokens, 2000),
         temperature: settings.temperature,
         toolBudgetExhausted: () => executor.budgetExhausted(),
         reserveNextStep: () => s.usage.reserveAi(settings.limits),

@@ -213,4 +213,80 @@ describe("withLeakedToolRecovery", () => {
     expect(end?.error).toContain("limit");
     expect(requests[1]?.messages.at(-1)?.content).toContain("NOT EXECUTED");
   });
+
+  it("rescues a textless round with structured results in a fresh context", async () => {
+    const req: ToolRequest = {
+      system: "s",
+      messages: [{ role: "user", content: "найди новости" }],
+      tools: [stubTool("web_search", () => Promise.resolve({ provider: "bing", results: [{ title: "Модель X" }] }))],
+      maxIterations: 4,
+      maxOutputTokens: 600,
+      toolBudgetExhausted: () => false,
+      reserveNextStep: () => true,
+    };
+    // Round 0: the model makes structured calls and never writes prose (a reasoning
+    // model starved by the token cap), so the whole turn would end "(No output)".
+    const { provider, requests } = stubProvider([{ calls: [{ id: "c1", name: "web_search", input: { query: "ai" } }] }, { text: "Итог: модель X вышла сегодня." }]);
+    const events: AgentEvent[] = [];
+    for await (const event of withLeakedToolRecovery(provider, req)) events.push(event);
+    expect(requests.length).toBe(2);
+    const rescue = requests[1];
+    expect(rescue?.tools).toEqual([]);
+    expect(rescue?.messages.length).toBe(1);
+    const content = String(rescue?.messages[0]?.content);
+    expect(content).toContain("найди новости");
+    expect(content).toContain("web_search");
+    expect(content).toContain('{"ok":true}');
+    const texts = events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
+    expect(texts).toContain("Итог: модель X вышла сегодня.");
+  });
+
+  it("rescues in a fresh context when even the forced no-tools round leaks markup", async () => {
+    const req: ToolRequest = {
+      system: "s",
+      messages: [{ role: "user", content: "найди новости" }],
+      tools: [stubTool("web_search", (input) => Promise.resolve({ query: input }))],
+      maxIterations: 10,
+      maxOutputTokens: 600,
+      toolBudgetExhausted: () => false,
+      reserveNextStep: () => true,
+    };
+    const mkLeak = (q: string) => `<tool_call><function=web_search><parameter=query>${q}</parameter></function></tool_call>`;
+    const { provider, requests } = stubProvider([
+      { text: mkLeak("ai news 1") },
+      { text: mkLeak("ai news 2") },
+      { text: mkLeak("ai news 3") },
+      { text: mkLeak("ai news 4") },
+      { text: "Свежие новости: релиз модели Y." },
+    ]);
+    const events: AgentEvent[] = [];
+    for await (const event of withLeakedToolRecovery(provider, req)) events.push(event);
+    // 3 recovery rounds + the forced no-tools round (still markup) + the fresh rescue.
+    expect(requests.length).toBe(5);
+    const rescue = requests[4];
+    expect(rescue?.tools).toEqual([]);
+    expect(rescue?.messages.length).toBe(1);
+    const content = String(rescue?.messages[0]?.content);
+    expect(content).toContain("найди новости");
+    // The exhausted round's own calls are dropped; earlier executed results are in.
+    expect(content).toContain("ai news 2");
+    expect(content).not.toContain("ai news 3");
+    const texts = events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
+    expect(texts).toContain("Свежие новости: релиз модели Y.");
+  });
+
+  it("does not rescue when a textless round had no results to answer from", async () => {
+    const req: ToolRequest = {
+      system: "s",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [stubTool("web_search", () => Promise.resolve({}))],
+      maxIterations: 3,
+      maxOutputTokens: 600,
+      toolBudgetExhausted: () => false,
+      reserveNextStep: () => true,
+    };
+    const { provider, requests } = stubProvider([{ text: "" }]);
+    for await (const _event of withLeakedToolRecovery(provider, req)) void _event;
+    expect(requests.length).toBe(1);
+  });
 });
