@@ -62,6 +62,7 @@ export const en = {
   "aiProvider.modeCustom": "Custom (OpenAI-compatible)",
   "aiProvider.workersHint": "Chat runs on Cloudflare Workers AI in your own account.",
   "aiProvider.customHint": "Chat runs on any OpenAI-compatible API (OpenRouter, OpenAI, Groq, Ollama, ...). Clef and semantic recall stay on Workers AI.",
+  "aiProvider.switchBackHint": "A custom provider is still active. Disconnect it to return to Cloudflare Workers AI — the stored API key is deleted.",
   "aiProvider.baseUrl": "Base URL",
   "aiProvider.baseUrlHint": "Any OpenAI-compatible API",
   "aiProvider.model": "Model",

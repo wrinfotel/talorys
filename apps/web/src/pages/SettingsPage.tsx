@@ -290,6 +290,16 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
           <option value="custom">{t("aiProvider.modeCustom")}</option>
         </Select>
       </Row>
+      {/* Switching back to Workers AI must not dead-end: without this row the dropdown
+          changes nothing and the only way back (Disconnect) sits inside the hidden
+          custom form. Disconnecting is the server-side switch to the default model. */}
+      {mode === "workers-ai" && customConfigured && (
+        <Row label={t("aiProvider.disconnect")} hint={t("aiProvider.switchBackHint")}>
+          <Button variant="outline" onClick={() => setConfirmDisconnect(true)} loading={disconnect.isPending}>
+            {t("aiProvider.disconnect")}
+          </Button>
+        </Row>
+      )}
       {mode === "custom" &&
         (status.isLoading ? (
           <div className="flex justify-center py-6">
@@ -325,17 +335,19 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
                 {t("common.save")}
               </Button>
             </div>
-            <ConfirmDialog
-              open={confirmDisconnect}
-              title={t("aiProvider.disconnectTitle")}
-              message={t("aiProvider.disconnectMessage")}
-              confirmLabel={t("aiProvider.disconnect")}
-              onCancel={() => setConfirmDisconnect(false)}
-              onConfirm={() => disconnect.mutate(undefined)}
-              loading={disconnect.isPending}
-            />
           </>
         ))}
+      {/* Shared by both switch-back paths: the row above (Workers AI selected while a
+          custom provider is active) and Disconnect inside the custom form. */}
+      <ConfirmDialog
+        open={confirmDisconnect}
+        title={t("aiProvider.disconnectTitle")}
+        message={t("aiProvider.disconnectMessage")}
+        confirmLabel={t("aiProvider.disconnect")}
+        onCancel={() => setConfirmDisconnect(false)}
+        onConfirm={() => disconnect.mutate(undefined)}
+        loading={disconnect.isPending}
+      />
     </Section>
   );
 }

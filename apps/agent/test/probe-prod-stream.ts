@@ -15,11 +15,12 @@ const WEATHER_TASK = "Какая погода в Москве сегодня? К
 
 function stubTools(): ToolSet {
   const tools: ToolSet = {};
+  const real = process.env.PROBE_REAL_TOOLS === "1";
   for (const t of ALL_TOOLS) {
     tools[t.name] = {
       description: t.description,
       inputSchema: t.input,
-      execute: async () => ({ stub: true, note: "probe stub result" }),
+      execute: real ? t.execute : async () => ({ stub: true, note: "probe stub result" }),
     } as ToolSet[string];
   }
   return tools;
