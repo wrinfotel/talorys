@@ -63,6 +63,7 @@ export const en = {
   "aiProvider.workersHint": "Chat runs on Cloudflare Workers AI in your own account.",
   "aiProvider.customHint": "Chat runs on any OpenAI-compatible API (OpenRouter, OpenAI, Groq, Ollama, ...). Clef and semantic recall stay on Workers AI.",
   "aiProvider.saveWorkers": "Switch back to Workers AI",
+  "aiProvider.workersActive": "Workers AI is active",
   "aiProvider.workersSaved": "Switched to Workers AI — your custom provider stays saved",
   "aiProvider.switchToWorkersHint": "Chat switches to Cloudflare Workers AI. Your custom provider (URL, model, key) stays saved — switch back with one Save in the Custom form.",
   "aiProvider.pausedHint": "Your custom provider ({model}) is saved but paused — chat runs on Workers AI.",

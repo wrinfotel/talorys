@@ -23,14 +23,14 @@ import { applyLanguage, browserLanguage, LANGUAGE_NAMES, useI18n } from "../lib/
 const TABS = ["General", "AI", "Privacy", "Security", "Integrations", "About"] as const;
 type Tab = (typeof TABS)[number];
 
-function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+function Row({ label, hint, children }: { label: string; hint?: ReactNode; children?: ReactNode }) {
   return (
     <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
         <p className="text-sm font-medium">{label}</p>
         {hint && <p className="mt-0.5 text-xs leading-5 text-fg-subtle">{hint}</p>}
       </div>
-      <div className="shrink-0 sm:w-64">{children}</div>
+      {children && <div className="shrink-0 sm:w-64">{children}</div>}
     </div>
   );
 }
@@ -303,15 +303,20 @@ function ProviderSection({ settings, mode, onModeChange }: { settings: Settings;
           <option value="custom">{t("aiProvider.modeCustom")}</option>
         </Select>
       </Row>
-      {/* The dropdown alone changes nothing server-side; this Save performs the switch to
-          Workers AI. The custom provider stays stored (paused), so returning is one Save
-          in the Custom form — nothing is deleted here. */}
-      {mode === "workers-ai" && customConfigured && (
-        <Row label={t("aiProvider.saveWorkers")} hint={customActive ? t("aiProvider.switchToWorkersHint") : t("aiProvider.pausedHint", { model: settings.aiProvider?.model ?? "" })}>
-          <Button variant="outline" disabled={!customActive} loading={pauseProvider.isPending} onClick={() => pauseProvider.mutate(undefined)}>
-            {t("common.save")}
-          </Button>
-        </Row>
+      {/* The dropdown alone changes nothing server-side. While the custom provider is the
+          active one, this Save performs the switch to Workers AI; once it is already paused
+          the row is information only — no button, nothing to do. Either way the custom
+          provider stays stored, so returning is one Save in the Custom form. */}
+      {mode === "workers-ai" && customConfigured && !status.isLoading && (
+        customActive ? (
+          <Row label={t("aiProvider.saveWorkers")} hint={t("aiProvider.switchToWorkersHint")}>
+            <Button variant="outline" loading={pauseProvider.isPending} onClick={() => pauseProvider.mutate(undefined)}>
+              {t("common.save")}
+            </Button>
+          </Row>
+        ) : (
+          <Row label={t("aiProvider.workersActive")} hint={t("aiProvider.pausedHint", { model: settings.aiProvider?.model ?? "" })} />
+        )
       )}
       {mode === "custom" &&
         (status.isLoading ? (
@@ -373,7 +378,11 @@ function AiTab({ settings }: { settings: Settings }) {
   const [limits, setLimits] = useState<Limits>(settings.limits);
   const [temperature, setTemperature] = useState(settings.temperature);
   // Local form state: switching provider mode only changes what Save/Disconnect will do.
-  const [providerMode, setProviderMode] = useState<ProviderMode>(settings.aiProvider ? "custom" : "workers-ai");
+  // The initial mode reflects what chat actually runs on: a saved-but-paused custom
+  // provider (disabled: true) still means Workers AI, not Custom.
+  const [providerMode, setProviderMode] = useState<ProviderMode>(
+    settings.aiProvider && settings.aiProvider.disabled !== true ? "custom" : "workers-ai",
+  );
   const dirtyLimits = JSON.stringify(limits) !== JSON.stringify(settings.limits) || temperature !== settings.temperature;
   return (
     <>
