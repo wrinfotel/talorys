@@ -67,6 +67,11 @@ memories and limits as the chat in the web UI:
   and notifications are on.
 - `/help` — a short summary of what the bot can do.
 
+Replies arrive formatted: the agent answers in Markdown and the bot converts
+it to Telegram's own markup, so bold, italic, code blocks, links and
+paragraphs look right. A message Telegram refuses to parse still arrives, just
+as plain text.
+
 ### The "/" command menu
 
 Connecting the bot also registers its commands with Telegram, so the menu

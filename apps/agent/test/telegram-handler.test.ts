@@ -356,6 +356,17 @@ describe("telegram turn replies", () => {
     });
   });
 
+  it("sends the agent's markdown as Telegram HTML", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      const events: ChatStreamEvent[] = [start("c1"), { type: "text", delta: "Answer with **bold** and `code <here>`." }];
+      await processUpdate({ services: agent.services, runner: async () => fakeRunner(events), activeRuns: agent.activeRuns }, update("hello"));
+      const send = api.sent.filter((c) => c.url.endsWith("/sendMessage")).at(-1)!;
+      expect(send.body).toEqual({ chat_id: CHAT, parse_mode: "HTML", text: "Answer with <b>bold</b> and <code>code &lt;here&gt;</code>." });
+    });
+  });
+
   it("answers with the classified error text when the turn fails", async () => {
     await inAgent(async (agent) => {
       const api = await connected(agent);

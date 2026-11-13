@@ -1,4 +1,5 @@
 import { type Notification, randomToken, type TelegramStatus } from "@talorys/shared";
+import { telegramHtmlChunks } from "./markdown";
 import type { SecretBox } from "../services/secret-box";
 import type { SettingsService } from "../services/settings";
 import { clip } from "../services/text";
@@ -314,15 +315,30 @@ export class TelegramService {
     const chatId = this.allowedChatId();
     const token = await this.token();
     if (chatId == null || !token) return;
-    await this.sendMessage(chatId, telegramNotificationText(n), token);
+    await this.sendMessage(chatId, telegramNotificationText(n), { token });
   }
 
   /** Sends one chat message, splitting anything over Telegram's 4096-character limit. */
-  async sendMessage(chatId: number, text: string, token?: string): Promise<void> {
-    const bearer = token ?? (await this.token());
+  async sendMessage(chatId: number, text: string, opts: { token?: string; html?: boolean } = {}): Promise<void> {
+    const bearer = opts.token ?? (await this.token());
     if (!bearer) return;
-    for (const chunk of splitMessage(text)) {
-      await this.apiCall(bearer, "sendMessage", { chat_id: chatId, text: chunk });
+    for (const chunk of opts.html ? telegramHtmlChunks(text) : splitMessage(text)) {
+      await this.sendChunk(bearer, chatId, chunk, opts.html === true);
+    }
+  }
+
+  /**
+   * One chunk of a chat message. HTML chunks are sent with parse_mode so bold, code and
+   * links render; a chunk Telegram refuses to parse still gets delivered, just unformatted.
+   */
+  private async sendChunk(token: string, chatId: number, text: string, html: boolean): Promise<void> {
+    try {
+      await this.apiCall(token, "sendMessage", html ? { chat_id: chatId, text, parse_mode: "HTML" } : { chat_id: chatId, text });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!html || !/parse/i.test(message)) throw error;
+      console.warn("Telegram HTML message fell back to plain text", message);
+      await this.apiCall(token, "sendMessage", { chat_id: chatId, text });
     }
   }
 

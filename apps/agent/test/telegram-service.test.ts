@@ -317,6 +317,63 @@ describe("telegram service", () => {
     });
   });
 
+  it("sends markdown as Telegram HTML with parse_mode", async () => {
+    await inAgent(async (agent) => {
+      const api = happy();
+      const t = makeTelegram(agent, api.fetcher);
+      await t.connect(TOKEN, "https://me.pages.dev");
+      t.setPaired(100);
+      await t.sendMessage(100, "Hi **there** — read `x < y`.\n\n```\nlet a < 2;\n```\n\nSee [docs](https://example.com/a?b=1&c=2).", { html: true });
+      const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
+      expect(sends).toHaveLength(1);
+      expect(sends[0]!.body).toEqual({
+        chat_id: 100,
+        parse_mode: "HTML",
+        text: 'Hi <b>there</b> — read <code>x &lt; y</code>.\n<pre><code>let a &lt; 2;</code></pre>\nSee <a href="https://example.com/a?b=1&amp;c=2">docs</a>.',
+      });
+    });
+  });
+
+  it("retries a chunk Telegram refuses to parse as plain text", async () => {
+    await inAgent(async (agent) => {
+      let sendMessageCalls = 0;
+      const api = botApi((call) => {
+        if (call.url.endsWith("/sendMessage") && (sendMessageCalls += 1) === 1) {
+          return { ok: false, description: "Bad Request: can't parse entities in message text" };
+        }
+        return { ok: true, result: true };
+      });
+      const t = makeTelegram(agent, api.fetcher);
+      await t.connect(TOKEN, "https://me.pages.dev");
+      t.setPaired(100);
+      await t.sendMessage(100, "**bold**", { html: true });
+      const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
+      expect(sends).toHaveLength(2);
+      expect(sends[0]!.body.parse_mode).toBe("HTML");
+      expect(sends[1]!.body).toEqual({ chat_id: 100, text: "<b>bold</b>" });
+    });
+  });
+
+  it("splits a long markdown reply into HTML chunks without cutting a tag", async () => {
+    await inAgent(async (agent) => {
+      const api = happy();
+      const t = makeTelegram(agent, api.fetcher);
+      await t.connect(TOKEN, "https://me.pages.dev");
+      t.setPaired(100);
+      const markdown = Array.from({ length: 300 }, (_, i) => `Paragraph **${i}** with a [link](https://example.com/${i}).`).join("\n\n");
+      await t.sendMessage(100, markdown, { html: true });
+      const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
+      expect(sends.length).toBeGreaterThan(1);
+      for (const send of sends) {
+        expect(send.body.parse_mode).toBe("HTML");
+        const text = send.body.text as string;
+        expect(text.length).toBeLessThanOrEqual(4096);
+        expect((text.match(/<b>/g) ?? []).length).toBe((text.match(/<\/b>/g) ?? []).length);
+        expect((text.match(/<a /g) ?? []).length).toBe((text.match(/<\/a>/g) ?? []).length);
+      }
+    });
+  });
+
   it("delivers notifications created through the repository alongside push", async () => {
     await inAgent(async (agent) => {
       const s = agent.services;

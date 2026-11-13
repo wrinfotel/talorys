@@ -262,7 +262,9 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
 
     // A cancelled turn sends nothing: the owner already aborted it (e.g. from the web UI).
     if (controller.signal.aborted) return;
-    if (reply.trim()) await telegram.sendMessage(chatId, reply.trim());
+    // The reply is Markdown like the web chat; Telegram gets it as HTML (bold, code, links),
+    // split so tags never cross a message boundary, with a plain-text fallback.
+    if (reply.trim()) await telegram.sendMessage(chatId, reply.trim(), { html: true });
     else await telegram.sendMessage(chatId, errorReply ?? AI_ERROR_REPLY);
   } catch (error) {
     console.error("Telegram update processing failed", error);
