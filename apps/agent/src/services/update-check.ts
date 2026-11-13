@@ -1,6 +1,11 @@
 import type { SettingsService } from "./settings";
 
-export const LATEST_URL = "https://registry.npmjs.org/create-talorys/latest";
+/**
+ * Where "latest" comes from: this fork is installed from its own repository, not from
+ * npm, so the check reads the create-talorys package version on the fork's main branch.
+ * A release is a version bump there; the fix is the usual git pull + update flow.
+ */
+export const LATEST_URL = "https://raw.githubusercontent.com/wrinfotel/talorys/main/packages/create-talorys/package.json";
 const CACHE_KEY = "update.latest";
 const TTL_MS = 24 * 60 * 60 * 1000;
 /** Retry a failed lookup sooner than a successful one, but not on every page load. */

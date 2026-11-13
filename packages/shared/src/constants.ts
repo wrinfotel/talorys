@@ -1,4 +1,4 @@
-export const TALORYS_VERSION = "0.1.8";
+export const TALORYS_VERSION = "0.1.9";
 
 /** Stable identity of the single owner's agent inside the private DO namespace. */
 export const AGENT_INSTANCE_NAME = "personal-agent";
@@ -18,7 +18,7 @@ export const DEV_SESSION_COOKIE = "talorys_session";
 /** Header sent by the SPA on every API call. Simple-request CSRF can't set custom headers. */
 export const CSRF_HEADER = "x-talorys-request";
 
-export const GITHUB_URL = "https://github.com/rociiu/talorys";
+export const GITHUB_URL = "https://github.com/wrinfotel/talorys";
 
 /** Languages the web UI ships messages for. English is the default and the fallback for missing keys. */
 export const LANGUAGES = ["en", "ko"] as const;

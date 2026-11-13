@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { checkForUpdate, compareVersions } from "../src/services/update-check";
+import { checkForUpdate, compareVersions, LATEST_URL } from "../src/services/update-check";
 import { inAgent, loggedIn } from "./helpers";
 
-const registry = (version: string | null, calls: { n: number }) =>
-  (async () => {
+const registry = (version: string | null, calls: { n: number; url?: string }) =>
+  (async (input: RequestInfo | URL) => {
     calls.n++;
+    calls.url = String(input);
     if (version === null) throw new Error("offline");
     return new Response(JSON.stringify({ version }), { headers: { "content-type": "application/json" } });
   }) as unknown as typeof fetch;
@@ -20,10 +21,13 @@ describe("update check", () => {
     await inAgent(async (agent) => {
       const s = agent.services.settings;
       s.delete("update.latest");
-      const calls = { n: 0 };
+      const calls = { n: 0, url: undefined as string | undefined };
       const t = 1_000_000;
       const first = await checkForUpdate(s, "0.1.5", registry("0.2.0", calls), t);
       expect(first).toMatchObject({ enabled: true, latest: "0.2.0", update_available: true });
+      // The fork checks its own repository, not the upstream npm package.
+      expect(calls.url).toBe(LATEST_URL);
+      expect(LATEST_URL).toContain("raw.githubusercontent.com/wrinfotel/talorys/main");
       await checkForUpdate(s, "0.1.5", registry("0.3.0", calls), t + 60_000);
       expect(calls.n).toBe(1);
       const later = await checkForUpdate(s, "0.1.5", registry("0.3.0", calls), t + 25 * 3600_000);

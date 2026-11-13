@@ -2,7 +2,9 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
-## Unreleased
+## 0.1.9 — 2026-11-13
+
+### Added
 
 ### Added
 
@@ -14,6 +16,10 @@ All notable changes to Talorys are listed here. Versions match the `create-talor
 
 ### Fixed
 
+- Telegram chat replies render formatting now: bold, italic, code, links and paragraphs arrive as Telegram HTML instead of raw Markdown markers; a message Telegram refuses to parse still arrives as plain text
+- The Settings AI card shows the provider chat actually runs on — a saved-but-paused custom provider no longer makes the form open on Custom — and the paused state is an information row instead of a dead Save button
+- "Check for updates" asks this fork's repository for the latest version, not the upstream npm package, so an available update matches what the update flow actually delivers
+- The "Source code" link and the docs links point at this fork's repository
 - A chat message that never reached the server goes back to the composer instead of being lost, and Retry only appears when there's something to retry
 - A reply generating in one conversation no longer replaces Send with Stop in the others, where Stop cancelled the wrong reply
 - A failed page load or render shows a way to reload instead of a blank screen, and a tab left open across an update reloads itself
