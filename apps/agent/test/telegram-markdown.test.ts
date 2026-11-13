@@ -21,12 +21,12 @@ describe("telegram markdown conversion", () => {
 
   it("renders a fenced code block with its content escaped", () => {
     const [html] = telegramHtmlChunks('Before.\n\n```js\nif (a < b && b > c) {}\n```\n\nAfter.');
-    expect(html).toBe("Before.\n<pre><code>if (a &lt; b &amp;&amp; b &gt; c) {}</code></pre>\nAfter.");
+    expect(html).toBe("Before.\n\n<pre><code>if (a &lt; b &amp;&amp; b &gt; c) {}</code></pre>\n\nAfter.");
   });
 
   it("turns headings into bold lines and quotes into blockquotes", () => {
     const [html] = telegramHtmlChunks("## Plan\n\n> one\n> two\n\nbody");
-    expect(html).toBe("<b>Plan</b>\n<blockquote>one\ntwo</blockquote>\nbody");
+    expect(html).toBe("<b>Plan</b>\n\n<blockquote>one\ntwo</blockquote>\n\nbody");
   });
 
   it("turns an image into a link to the picture", () => {
@@ -36,7 +36,7 @@ describe("telegram markdown conversion", () => {
 
   it("drops horizontal rules that have no Telegram equivalent", () => {
     const [html] = telegramHtmlChunks("above\n\n---\n\nbelow");
-    expect(html).toBe("above\nbelow");
+    expect(html).toBe("above\n\nbelow");
   });
 
   it("keeps every chunk within the limit and never cuts a tag", () => {

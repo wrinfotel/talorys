@@ -170,20 +170,30 @@ function blockPieces(block: Block, max: number): string[] {
 
 /**
  * Chunks a Markdown reply into Telegram-ready HTML strings, each within `max`.
- * Chunk boundaries sit between blocks, so a chunk is always valid HTML on its own.
+ * Pieces of one block are joined by a line break; blocks (which the source separated
+ * by a blank line) by a blank line, so paragraphs stay apart. Chunk boundaries sit
+ * between blocks, so a chunk is always valid HTML on its own.
  */
 export function telegramHtmlChunks(markdown: string, max = TELEGRAM_HTML_CHUNK): string[] {
   const chunks: string[] = [];
   let current = "";
-  const append = (piece: string) => {
-    if (current && current.length + 1 + piece.length > max) {
+  let sameBlock = false;
+  const append = (piece: string, newBlock: boolean) => {
+    const separator = !current ? "" : newBlock && !sameBlock ? "\n\n" : "\n";
+    if (current && current.length + separator.length + piece.length > max) {
       chunks.push(current);
       current = piece;
     } else {
-      current = current ? `${current}\n${piece}` : piece;
+      current = current ? `${current}${separator}${piece}` : piece;
     }
+    sameBlock = !newBlock;
   };
-  for (const block of splitBlocks(markdown)) for (const piece of blockPieces(block, max)) append(piece);
+  for (const block of splitBlocks(markdown)) {
+    const pieces = blockPieces(block, max);
+    if (pieces.length === 0) continue; // e.g. a block that was only a horizontal rule
+    append(pieces[0]!, true);
+    for (const piece of pieces.slice(1)) append(piece, false);
+  }
   if (current) chunks.push(current);
   return chunks;
 }

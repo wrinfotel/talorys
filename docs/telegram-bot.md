@@ -85,9 +85,9 @@ registers it too.
 
 While **Deliver notifications here** is on (the default), every reminder and
 automation result that reaches your notification center is also sent to the
-linked chat — alongside Web Push, not instead of it. Messages arrive as plain
-text without Markdown markers, and long answers are split into several
-messages. Turn the toggle off to keep the bot chat-only.
+linked chat — alongside Web Push, not instead of it. Notifications arrive
+formatted like chat replies — the title in bold over the Markdown body, with
+a very long body clipped. Turn the toggle off to keep the bot chat-only.
 
 ## Security
 

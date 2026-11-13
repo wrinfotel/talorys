@@ -54,14 +54,14 @@ beforeEach(async () => {
 });
 
 describe("telegram message helpers", () => {
-  it("strips Markdown and collapses whitespace like push messages", () => {
-    expect(telegramNotificationText({ title: "**Reminder**", body: "Call `the`  dentist   now" })).toBe("Reminder\n\nCall the dentist now");
+  it("puts a bold title over a body that keeps its Markdown and line breaks", () => {
+    expect(telegramNotificationText({ title: "**Reminder**", body: "- one\n- two" })).toBe("**Reminder**\n\n- one\n- two");
   });
 
   it("clips the title and body to the notification limits", () => {
     const text = telegramNotificationText({ title: "t".repeat(200), body: "x".repeat(5000) });
-    expect(text.length).toBeLessThanOrEqual(100 + 2 + 3500);
-    expect(text.startsWith("t")).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(2 + 100 + 2 + 2 + 3500);
+    expect(text.startsWith("**ttt")).toBe(true);
     expect(text.endsWith("…")).toBe(true);
   });
 
@@ -286,7 +286,7 @@ describe("telegram service", () => {
       await t.idle();
       const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
       expect(sends).toHaveLength(1);
-      expect(sends[0]!.body).toEqual({ chat_id: 100, text: "Reminder\n\nCall the dentist" });
+      expect(sends[0]!.body).toEqual({ chat_id: 100, parse_mode: "HTML", text: "<b>Reminder</b>\n\nCall <code>the</code> dentist" });
     });
   });
 
@@ -329,7 +329,7 @@ describe("telegram service", () => {
       expect(sends[0]!.body).toEqual({
         chat_id: 100,
         parse_mode: "HTML",
-        text: 'Hi <b>there</b> — read <code>x &lt; y</code>.\n<pre><code>let a &lt; 2;</code></pre>\nSee <a href="https://example.com/a?b=1&amp;c=2">docs</a>.',
+        text: 'Hi <b>there</b> — read <code>x &lt; y</code>.\n\n<pre><code>let a &lt; 2;</code></pre>\n\nSee <a href="https://example.com/a?b=1&amp;c=2">docs</a>.',
       });
     });
   });
@@ -385,7 +385,7 @@ describe("telegram service", () => {
       await s.telegram.idle();
       const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
       expect(sends).toHaveLength(1);
-      expect(sends[0]!.body).toEqual({ chat_id: 100, text: "Reminder\n\nCall the dentist" });
+      expect(sends[0]!.body).toEqual({ chat_id: 100, parse_mode: "HTML", text: "<b>Reminder</b>\n\n<b>Call</b> the dentist" });
       expect(n.id).toEqual(expect.any(String));
     });
   });

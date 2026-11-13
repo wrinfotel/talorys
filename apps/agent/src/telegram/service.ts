@@ -61,13 +61,18 @@ const BOT_COMMANDS = [
  */
 const COMMANDS_VERSION = "3";
 
-/** Plain text for a Telegram message, mirroring `toPushMessage`: Markdown markers stripped, spaces collapsed. */
+/**
+ * Markdown for a Telegram notification: the title in bold over the body. Unlike push
+ * messages, the body keeps its Markdown and its line breaks — the send path converts it
+ * to Telegram HTML like a chat reply. The raw body is clipped so an overlong
+ * automation result stays a bounded, readable message.
+ */
 export function telegramNotificationText(n: Pick<Notification, "title" | "body">): string {
-  const plain = (text: string) => text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
-  const shorten = (text: string, max: number) => (text.length > max ? `${clip(text, max - 1)}…` : text);
-  const title = shorten(plain(n.title), 100);
-  const body = shorten(plain(n.body), NOTIFY_BODY_LIMIT);
-  return title ? (body ? `${title}\n\n${body}` : title) : body;
+  const title = n.title.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+  const shortTitle = title.length > 100 ? `${clip(title, 99)}…` : title;
+  const body = n.body.trim();
+  const clipped = body.length > NOTIFY_BODY_LIMIT ? `${clip(body, NOTIFY_BODY_LIMIT - 1)}…` : body;
+  return shortTitle ? `**${shortTitle}**\n\n${clipped}` : clipped;
 }
 
 /** Splits into pieces of at most `max` characters, preferring a line boundary over a mid-word cut. */
@@ -315,7 +320,7 @@ export class TelegramService {
     const chatId = this.allowedChatId();
     const token = await this.token();
     if (chatId == null || !token) return;
-    await this.sendMessage(chatId, telegramNotificationText(n), { token });
+    await this.sendMessage(chatId, telegramNotificationText(n), { token, html: true });
   }
 
   /** Sends one chat message, splitting anything over Telegram's 4096-character limit. */

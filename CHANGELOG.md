@@ -2,6 +2,12 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
+## Unreleased
+
+### Fixed
+
+- Telegram notifications (reminders, automation results) render formatting now, like chat replies: the title in bold over the converted Markdown body with its line breaks kept, instead of one stripped, space-collapsed paragraph
+
 ## 0.1.9 — 2026-11-13
 
 ### Added
