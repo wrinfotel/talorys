@@ -32,9 +32,13 @@ describe("ai provider schemas", () => {
   });
 
   it("validates the status shape and its kind", () => {
-    expect(aiProviderStatusSchema.safeParse({ kind: "workers-ai", base_url: null, model: null, has_api_key: false }).success).toBe(true);
-    expect(aiProviderStatusSchema.safeParse({ kind: "custom", base_url: PROVIDER_UPDATE.base_url, model: "gpt-4o", has_api_key: true }).success).toBe(true);
-    expect(aiProviderStatusSchema.safeParse({ kind: "other", base_url: null, model: null, has_api_key: false }).success).toBe(false);
+    expect(aiProviderStatusSchema.safeParse({ kind: "workers-ai", saved: false, base_url: null, model: null, has_api_key: false }).success).toBe(true);
+    // A paused custom config stays saved but reports Workers AI as the active kind.
+    expect(aiProviderStatusSchema.safeParse({ kind: "workers-ai", saved: true, base_url: PROVIDER_UPDATE.base_url, model: "gpt-4o", has_api_key: true }).success).toBe(true);
+    expect(aiProviderStatusSchema.safeParse({ kind: "custom", saved: true, base_url: PROVIDER_UPDATE.base_url, model: "gpt-4o", has_api_key: true }).success).toBe(true);
+    expect(aiProviderStatusSchema.safeParse({ kind: "other", saved: false, base_url: null, model: null, has_api_key: false }).success).toBe(false);
+    // saved is required.
+    expect(aiProviderStatusSchema.safeParse({ kind: "workers-ai", base_url: null, model: null, has_api_key: false }).success).toBe(false);
   });
 
   it("stores a custom provider in settings and accepts an explicit null reset", () => {
