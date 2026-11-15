@@ -2,7 +2,14 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
-## Unreleased
+## 0.1.10 — 2026-11-14
+
+### Added
+
+- **Documents in chat.** Attach a PDF or plain-text file (web composer 📎 or a Telegram document) and ask about it: Talorys extracts the text (up to 12 MB per file, 3 per message), keeps it for the turn, and reads it with a `read_document` tool in 20,000-character chunks, so long documents work within the context budget. Documents ride along in backups as their extracted text.
+- **Approval buttons in Telegram.** A reply that proposes a destructive action carries Approve / Cancel buttons right in the chat; the same at-most-once execution as the web card decides the outcome, a second press says "already handled", and the AI learns the decision on the next turn. Already-connected bots pick this up without reconnecting.
+- **The agent manages schedules on demand.** New `run_automation` and `edit_automation` tools run a routine right now or rename/reschedule/pause it from chat, and the system prompt now says so — the agent no longer claims it can't.
+- **Fallback to Workers AI.** When a custom provider fails before answering, the turn completes on the built-in free model instead of dying, the switch is logged, and the next turn tries the custom provider again. An unreadable API key still reports itself instead of silently falling back.
 
 ### Fixed
 
