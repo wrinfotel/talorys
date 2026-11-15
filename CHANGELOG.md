@@ -2,10 +2,12 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
-## Unreleased
+## 0.1.11 — 2026-11-15
 
 ### Fixed
 
+- Scheduled automations — the timer and "Run now" alike — now fall back to Workers AI when the custom provider fails or returns an empty result, like chat turns already do. A flaky provider no longer produces a "This automation failed" or "(No output)" notification when the default model can answer.
+- Chat also falls back when the provider "succeeds" with nothing (usage but no text and no tool calls), instead of answering with a placeholder.
 - A full-size document is now readable in one turn: `read_document` allows 10 calls (8 × 20,000 characters stopped 40,000 characters short of the cap).
 - `document_ids` sent together with `retry` is now rejected with a clear error instead of being validated and then silently dropped.
 - The web composer sends an attached document without typed text (with a default question), matching the Telegram path.
