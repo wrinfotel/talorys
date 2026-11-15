@@ -47,6 +47,8 @@ export function exportData(s: Services): Backup {
         .map((a) => ({ ...a, schedule: JSON.parse(String(a.schedule)), enabled: a.enabled === 1 })),
       // Where each server is and how it authenticates; never the credential, a session or tool choices.
       mcp_servers: db.all(`SELECT id, name, url, auth_type, created_at FROM tal_mcp_servers ORDER BY created_at`),
+      // Attached documents travel as their extracted text; the original bytes are not stored anywhere.
+      documents: db.all(`SELECT id, name, mime_type, size, chars, text, created_at FROM tal_documents ORDER BY created_at`),
     },
   } as unknown as Backup;
 }
@@ -61,6 +63,7 @@ export interface ImportSummary {
   automations: number;
   /** Imported automations always arrive paused; the owner enables them. */
   automations_paused: number;
+  documents: number;
   /** Imported MCP servers arrive disabled, without credentials or enabled tools. */
   mcp_servers: number;
   ignored_settings: string[];
@@ -199,6 +202,16 @@ export async function importData(s: Services, raw: unknown): Promise<ImportSumma
       );
       automations++;
     }
+    let documents = 0;
+    for (const doc of d.documents) {
+      // Extracted text only; an existing document keeps the owner's version.
+      if (db.one(`SELECT 1 AS x FROM tal_documents WHERE id = ?`, doc.id)) continue;
+      db.run(
+        `INSERT INTO tal_documents (id, name, mime_type, size, chars, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        doc.id, str(doc.name, "document"), str(doc.mime_type, "application/octet-stream"), Number(doc.size) || 0, Number(doc.chars) || String(doc.text ?? "").length, String(doc.text ?? ""), str(doc.created_at, now),
+      );
+      documents++;
+    }
     let mcpServers = 0;
     for (const m of d.mcp_servers) {
       // An imported server never connects or exposes a tool on its own: it arrives disabled, with no
@@ -238,6 +251,7 @@ export async function importData(s: Services, raw: unknown): Promise<ImportSumma
       projects: d.projects.length,
       automations,
       automations_paused: automations,
+      documents,
       mcp_servers: mcpServers,
       ignored_settings: [...ignored],
     };

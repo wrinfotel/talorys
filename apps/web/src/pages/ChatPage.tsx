@@ -15,6 +15,7 @@ import {
   Plus,
   RotateCcw,
   Search,
+  Paperclip,
   Square,
   Trash2,
   XCircle,
@@ -27,7 +28,7 @@ import { Button, ConfirmDialog, Dialog, Input, Spinner } from "../components/ui"
 import { Logo } from "../components/Logo";
 import { keys, useApiMutation, useConversation, useConversations, useSettings, useTimezone } from "../hooks/queries";
 import { usePageTitle } from "../hooks/pageTitle";
-import { api, ApiError, streamChat } from "../lib/api";
+import { api, ApiError, streamChat, uploadDocument } from "../lib/api";
 import { notifyChatFailure, notifyChatTurn } from "../lib/chatAlerts";
 import { cn, copyText, relativeTime } from "../lib/utils";
 import { useI18n } from "../lib/i18n";
@@ -52,6 +53,23 @@ const SUGGESTIONS = [
   "Every Friday at 5pm, remind me to plan next week",
 ];
 
+/** Documents attach to a turn: at most 3, at most 12 MB each (the server extracts the text). */
+const MAX_DOCUMENT_BYTES = 12 * 1024 * 1024;
+const DOCUMENT_ACCEPT = ".pdf,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.html,.htm,text/*,application/pdf";
+
+interface PendingDocument {
+  id: string;
+  name: string;
+  chars: number;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(binary);
+}
+
 export function ChatPage() {
   const { t } = useI18n();
   const { conversationId } = useParams();
@@ -69,6 +87,33 @@ export function ChatPage() {
   const sendsInFlight = useRef(0);
   const restoreDraft = useRef<(text: string) => void>(() => {});
   const [announcement, setAnnouncement] = useState("");
+  const [pendingDocs, setPendingDocs] = useState<PendingDocument[]>([]);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+
+  async function handleFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setDocError(null);
+    if (file.size > MAX_DOCUMENT_BYTES) {
+      setDocError("Documents are limited to 12 MB.");
+      return;
+    }
+    if (pendingDocs.length >= 3) {
+      setDocError("At most 3 documents per message.");
+      return;
+    }
+    setUploadingDoc(true);
+    try {
+      const data_base64 = toBase64(new Uint8Array(await file.arrayBuffer()));
+      const doc = await uploadDocument({ name: file.name, mime: file.type || "application/octet-stream", data_base64 });
+      setPendingDocs((docs) => [...docs, doc]);
+    } catch (error) {
+      setDocError(error instanceof ApiError ? error.message : "The document could not be uploaded.");
+    } finally {
+      setUploadingDoc(false);
+    }
+  }
 
   const messages = conversation.data?.messages ?? [];
   const streaming = !!stream && !stream.done;
@@ -94,7 +139,7 @@ export function ChatPage() {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, stream?.text, stream?.tools.length, stream?.error]);
 
-  async function send(text: string, opts: { retry?: boolean } = {}) {
+  async function send(text: string, opts: { retry?: boolean; documentIds?: string[] } = {}) {
     if (streamingHere) return;
     const controller = new AbortController();
     abortRef.current = controller;
@@ -121,7 +166,12 @@ export function ChatPage() {
     setStream({ conversationId: convId, userText: opts.retry ? "" : text, userMessageId: null, assistantId: null, text: "", tools: [], error: null, done: false, canRetry: saved });
     try {
       await streamChat(
-        { conversation_id: convId ?? undefined, message: opts.retry ? "retry" : text, retry: opts.retry },
+        {
+          conversation_id: convId ?? undefined,
+          message: opts.retry ? "retry" : text,
+          retry: opts.retry,
+          document_ids: opts.documentIds?.length ? opts.documentIds : undefined,
+        },
         (event) => {
           switch (event.type) {
             case "title":
@@ -129,6 +179,9 @@ export function ChatPage() {
               break;
             case "start":
               saved = true;
+              // The server has the message and its documents; a retry from here needs no re-attach.
+              setPendingDocs([]);
+              setDocError(null);
               if (!convId) {
                 convId = event.conversation_id;
                 navigate(`/chat/${convId}`, { replace: true });
@@ -264,7 +317,18 @@ export function ChatPage() {
           )}
         </div>
 
-        <Composer streaming={streamingHere || remoteStreaming} onSend={(t) => void send(t)} onStop={stop} autoFocus={showEmpty} restoreRef={restoreDraft} />
+        <Composer
+          streaming={streamingHere || remoteStreaming}
+          onSend={(t) => void send(t, { documentIds: pendingDocs.map((d) => d.id) })}
+          onStop={stop}
+          autoFocus={showEmpty}
+          restoreRef={restoreDraft}
+          documents={pendingDocs}
+          uploading={uploadingDoc}
+          error={docError}
+          onFiles={(files) => void handleFiles(files)}
+          onRemoveDocument={(id) => setPendingDocs((docs) => docs.filter((d) => d.id !== id))}
+        />
         <div role="status" className="sr-only">{announcement}</div>
       </section>
 
@@ -649,6 +713,11 @@ function Composer({
   onStop,
   autoFocus,
   restoreRef,
+  documents,
+  uploading,
+  error,
+  onFiles,
+  onRemoveDocument,
 }: {
   streaming: boolean;
   onSend: (t: string) => void;
@@ -656,9 +725,15 @@ function Composer({
   autoFocus?: boolean;
   /** Filled with a function that puts unsent text back, ahead of anything typed since. */
   restoreRef: RefObject<(text: string) => void>;
+  documents: { id: string; name: string; chars: number }[];
+  uploading: boolean;
+  error: string | null;
+  onFiles: (files: FileList | null) => void;
+  onRemoveDocument: (id: string) => void;
 }) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   restoreRef.current = (text) => {
     setValue((typed) => (typed.trim() ? `${text}\n\n${typed}` : text));
     ref.current?.focus();
@@ -685,28 +760,70 @@ function Composer({
 
   return (
     <div className="chat-composer shrink-0 border-t border-border bg-bg px-3 pb-[calc(env(safe-area-inset-bottom)+4.5rem)] pt-3 md:px-6 md:pb-5">
-      <div className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/15">
-        <textarea
-          ref={ref}
-          rows={1}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={onKeyDown}
-          autoFocus={autoFocus}
-          maxLength={16000}
-          placeholder="Ask Talorys anything…"
-          aria-label="Message"
-          className="max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] leading-6 placeholder:text-fg-subtle focus:outline-none"
-        />
-        {streaming ? (
-          <Button variant="secondary" size="icon" onClick={onStop} aria-label="Stop generating" className="rounded-xl">
-            <Square className="h-3.5 w-3.5 fill-current" />
-          </Button>
-        ) : (
-          <Button size="icon" onClick={submit} disabled={!value.trim()} aria-label="Send message" className="rounded-xl">
-            <ArrowUp className="h-4 w-4" />
-          </Button>
+      <div className="mx-auto w-full max-w-3xl">
+        {(documents.length > 0 || uploading || error) && (
+          <div className="flex flex-wrap items-center gap-2 px-2 pb-2">
+            {documents.map((d) => (
+              <span key={d.id} className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs">
+                <Paperclip className="h-3 w-3 text-fg-subtle" />
+                <span className="max-w-[16rem] truncate">{d.name}</span>
+                <span className="text-fg-subtle">{(d.chars / 1000).toFixed(1)}k chars</span>
+                <button type="button" onClick={() => onRemoveDocument(d.id)} aria-label={`Remove ${d.name}`} className="text-fg-subtle hover:text-fg">
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ))}
+            {uploading && (
+              <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-fg-subtle">
+                <Loader2 className="h-3 w-3 animate-spin" /> Reading…
+              </span>
+            )}
+            {error && <span className="text-xs text-danger">{error}</span>}
+          </div>
         )}
+        <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface p-2 shadow-sm focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/15">
+          <input
+            ref={fileRef}
+            type="file"
+            accept={DOCUMENT_ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              onFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => fileRef.current?.click()}
+            disabled={streaming || uploading}
+            aria-label="Attach a document"
+            className="rounded-xl"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
+          <textarea
+            ref={ref}
+            rows={1}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={onKeyDown}
+            autoFocus={autoFocus}
+            maxLength={16000}
+            placeholder="Ask Talorys anything…"
+            aria-label="Message"
+            className="max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent px-2 py-2 text-[15px] leading-6 placeholder:text-fg-subtle focus:outline-none"
+          />
+          {streaming ? (
+            <Button variant="secondary" size="icon" onClick={onStop} aria-label="Stop generating" className="rounded-xl">
+              <Square className="h-3.5 w-3.5 fill-current" />
+            </Button>
+          ) : (
+            <Button size="icon" onClick={submit} disabled={!value.trim()} aria-label="Send message" className="rounded-xl">
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
       <p className="mx-auto mt-2 hidden max-w-3xl text-center text-[11px] text-fg-subtle md:block">
         Runs on your Cloudflare account. Talorys can make mistakes — check important details.

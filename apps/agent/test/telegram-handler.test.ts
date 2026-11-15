@@ -6,6 +6,7 @@ import type { AgentRunner } from "../src/agent/runner";
 import { SecretBox } from "../src/services/secret-box";
 import { agentDeps, processUpdate, type TelegramUpdate } from "../src/telegram/handler";
 import { inAgent, proposeAction } from "./helpers";
+import { defaultExtractor } from "../src/services/documents";
 
 const TOKEN = "123456:AAQ-example-token_abcdef";
 const CHAT = 100;
@@ -515,6 +516,82 @@ describe("telegram approval buttons", () => {
       await processUpdate(agentDeps(agent), callbackUpdate("make-me-a-sandwich"));
       expect(callsOf(api, "answerCallbackQuery")).toHaveLength(1); // only the unknown-payload answer for the owner
       expect(callsOf(api, "sendMessage")).toHaveLength(0);
+    });
+  });
+});
+
+describe("telegram documents", () => {
+  const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+
+  /** A fetcher that also serves getFile and the file download, like the real Bot API. */
+  function fileApi(fileBytes: string) {
+    const sent: BotApiCall[] = [];
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      sent.push({ url, body });
+      if (url.endsWith("/getMe")) return jsonResponse({ ok: true, result: { id: 1, username: "talorys_bot" } });
+      if (url.endsWith("/getFile")) {
+        return jsonResponse({ ok: true, result: { file_path: "docs/file_1.txt" } });
+      }
+      if (url.includes("/file/bot")) return new Response(fileBytes, { status: 200 });
+      return jsonResponse({ ok: true, result: true });
+    }) as typeof fetch;
+    return { fetcher, sent };
+  }
+
+  it("downloads, stores and attaches a document, then answers the caption", async () => {
+    await inAgent(async (agent) => {
+      const s = agent.services;
+      const api = fileApi("raw bytes");
+      s.telegram.fetcher = api.fetcher;
+      await s.telegram.connect(TOKEN, "https://me.pages.dev");
+      s.telegram.setPaired(CHAT);
+      s.documents.extractor = async () => "extracted text";
+
+      const captured: { message?: string; documentIds?: string[] } = {};
+      const runner = {
+        chat: (input: { message: string; documentIds?: string[] }) =>
+          (async function* () {
+            captured.message = input.message;
+            captured.documentIds = input.documentIds;
+            yield start("c1");
+            yield { type: "text", delta: "It says hello." };
+          })(),
+      } as unknown as AgentRunner;
+      await processUpdate(
+        { services: s, runner: async () => runner, activeRuns: agent.activeRuns },
+        {
+          message: {
+            chat: { id: CHAT },
+            caption: "What does it say?",
+            document: { file_id: "f1", file_name: "doc.txt", mime_type: "text/plain", file_size: 9 },
+          },
+        },
+      );
+      expect(captured.message).toBe("What does it say?");
+      expect(captured.documentIds).toHaveLength(1);
+      // The document is stored with its extracted text, ready for read_document.
+      const stored = s.db.all<{ id: string; name: string; chars: number }>(`SELECT id, name, chars FROM tal_documents`);
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({ name: "doc.txt", chars: 14 });
+      expect(replies(api).at(-1)).toBe("It says hello.");
+    });
+  });
+
+  it("refuses a file it cannot read without spending an AI turn", async () => {
+    await inAgent(async (agent) => {
+      const s = agent.services;
+      const api = fileApi("MZ");
+      s.telegram.fetcher = api.fetcher;
+      await s.telegram.connect(TOKEN, "https://me.pages.dev");
+      s.telegram.setPaired(CHAT);
+      // The real extractor (an earlier test stubbed it) rejects .exe files on its own.
+      s.documents.extractor = defaultExtractor;
+      await processUpdate(agentDeps(agent), {
+        message: { chat: { id: CHAT }, document: { file_id: "f2", file_name: "prog.exe", mime_type: "application/octet-stream", file_size: 2 } },
+      });
+      expect(replies(api)).toEqual(["Only PDF and plain-text documents are supported for now."]);
     });
   });
 });

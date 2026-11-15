@@ -132,6 +132,9 @@ access to hundreds of models (free and paid) with a single key.
    one of the recent ones; `/context` — how full the current conversation's memory is;
    `/compact` — fold older messages into a summary to free it; `/status` — which model and
    options are active; `/help` — help text.
+   You can also attach a PDF or text file to a message (the 📎 button in the web chat,
+   or just send the file to the bot), and when the agent proposes a change that needs your
+   OK, the Telegram reply carries Approve / Cancel buttons.
 
 **Notifications in Telegram:** in the same card, turn on **Deliver notifications here** —
 reminders and routine results will arrive in your chat.

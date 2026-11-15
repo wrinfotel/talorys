@@ -6,6 +6,8 @@ import { NoteRepository, ProjectRepository } from "../db/repositories/notes";
 import { ConversationRepository } from "../db/repositories/conversations";
 import { AutomationRepository, NotificationRepository } from "../db/repositories/automations";
 import { PendingActionRepository } from "../db/repositories/pending-actions";
+import { DocumentRepository } from "../db/repositories/documents";
+import { DocumentService } from "./documents";
 import { SettingsService } from "./settings";
 import { ActivityLog, UsageService } from "./usage";
 import { AuthService } from "../auth/auth-service";
@@ -31,6 +33,7 @@ export interface Services {
   automationsRepo: AutomationRepository;
   notifications: NotificationRepository;
   pendingActions: PendingActionRepository;
+  documents: DocumentService;
   settings: SettingsService;
   usage: UsageService;
   activity: ActivityLog;
@@ -82,6 +85,7 @@ export function createServices(
     automationsRepo,
     notifications,
     pendingActions: new PendingActionRepository(db),
+    documents: new DocumentService(new DocumentRepository(db)),
     settings,
     usage,
     activity,

@@ -50,6 +50,8 @@ export interface PromptContext {
   scheduled?: boolean;
   /** The finished section of tasks, notes and automations that may relate to the message; none when unset or empty. */
   items?: string;
+  /** The "attached documents" section: names, ids and a pointer to the read_document tool. */
+  attachments?: string;
   /** True when tools from remote MCP servers are offered this turn. */
   externalTools?: boolean;
 }
@@ -81,6 +83,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     );
   }
   if (ctx.items) sections.push(ctx.items);
+  if (ctx.attachments) sections.push(ctx.attachments);
   if (ctx.conversationSummary) {
     sections.push(`Summary of earlier parts of this conversation:\n${ctx.conversationSummary}`);
   }

@@ -79,6 +79,10 @@ at-most-once path as the button in the web app: the result comes back as a
 short message, stale buttons disappear, and a second press only says
 "already handled". Proposals expire after 30 minutes, like in the web UI.
 
+**Documents.** Send a PDF or plain-text file (with a caption as your
+question) and the agent reads its extracted text — up to 20 MB per file.
+Files it cannot read get a clear refusal instead of a wasted AI turn.
+
 ### The "/" command menu
 
 Connecting the bot also registers its commands with Telegram, so the menu

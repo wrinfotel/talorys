@@ -405,4 +405,10 @@ export class TelegramService {
       /* the indicator is cosmetic */
     }
   }
+
+  /** Resolves a file sent to the bot into a download path (Bot API getFile). */
+  async getFile(token: string, fileId: string): Promise<{ file_path?: string } | null> {
+    const result = (await this.apiCall(token, "getFile", { file_id: fileId })) as { file_path?: string } | undefined;
+    return result ?? null;
+  }
 }

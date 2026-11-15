@@ -5,11 +5,14 @@ import type { AIProvider } from "../ai/provider";
 import { ALL_TOOLS, runApprovedAction } from "../tools";
 import type { Services } from "../services/container";
 import { clip } from "../services/text";
+import { MAX_TELEGRAM_DOCUMENT_BYTES, UnsupportedDocumentError, type StoredDocument } from "../services/documents";
 
 /** The part of a Telegram update this handler reacts to. Everything else is ignored. */
 export interface TelegramUpdateMessage {
   chat: { id: number };
   text?: string;
+  caption?: string;
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
 }
 
 /** A press on an inline keyboard button attached to a reply that proposed an action. */
@@ -208,15 +211,54 @@ async function handleCallback(deps: UpdateHandlerDeps, callback: TelegramCallbac
  * nothing here throws: failures are logged and, when the chat can be reached, answered with a
  * short apology instead.
  */
+/** Downloads can take longer than a Bot API control call, especially for big PDFs. */
+const FILE_DOWNLOAD_TIMEOUT_MS = 30_000;
+
+/**
+ * Downloads a document sent to the bot and stores its extracted text. Returns null when
+ * the failure was already answered in the chat; the turn then doesn't run.
+ */
+async function ingestTelegramDocument(deps: UpdateHandlerDeps, message: TelegramUpdateMessage, chatId: number): Promise<StoredDocument | null> {
+  const telegram = deps.services.telegram;
+  const document = message.document!;
+  try {
+    if ((document.file_size ?? 0) > MAX_TELEGRAM_DOCUMENT_BYTES) {
+      await telegram.sendMessage(chatId, "That file is too large — the limit is 20 MB.");
+      return null;
+    }
+    const token = await telegram.token();
+    if (!token) return null;
+    const file = await telegram.getFile(token, document.file_id);
+    if (!file?.file_path) {
+      await telegram.sendMessage(chatId, "I couldn't download that file from Telegram. Try sending it again.");
+      return null;
+    }
+    const response = await telegram.fetcher(`https://api.telegram.org/file/bot${token}/${file.file_path}`, {
+      signal: AbortSignal.timeout(FILE_DOWNLOAD_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      await telegram.sendMessage(chatId, "I couldn't download that file from Telegram. Try sending it again.");
+      return null;
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return await deps.services.documents.ingest({ name: document.file_name ?? "document", mime: document.mime_type ?? "application/octet-stream", bytes });
+  } catch (error) {
+    console.warn("Telegram document ingestion failed", error instanceof Error ? error.message : String(error));
+    const reason = error instanceof UnsupportedDocumentError ? error.message : "I couldn't read that file.";
+    await telegram.sendMessage(chatId, reason).catch(() => {});
+    return null;
+  }
+}
+
 export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
     await handleCallback(deps, update.callback_query);
     return;
   }
-  const text = update.message?.text?.trim();
   const chatId = update.message?.chat.id;
-  if (!text || chatId === undefined) return;
+  if (chatId === undefined) return;
   const telegram = deps.services.telegram;
+  const text = (update.message?.text ?? update.message?.caption ?? "").trim();
   try {
     // 1. Unlinked chats may only pair via /start <code>; every other message is ignored.
     const allowedChatId = telegram.allowedChatId();
@@ -239,7 +281,17 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
       return;
     }
 
-    // 3. Owner commands. The "/" menu above the keyboard is registered in the background
+    // 3. A document rides ahead of the text: ingest it first, then let the caption (or the
+    //    text) drive the turn. A failed ingest has already answered in the chat.
+    let documentIds: string[] | undefined;
+    if (update.message?.document) {
+      const stored = await ingestTelegramDocument(deps, update.message, chatId);
+      if (!stored) return;
+      documentIds = [stored.id];
+    }
+    if (!text && !documentIds) return;
+
+    // 4. Owner commands. The "/" menu above the keyboard is registered in the background
     //    when needed, so bots connected before the menu existed pick it up on this message.
     telegram.ensureCommandsInBackground();
     if (text === "/new") {
@@ -284,7 +336,7 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
       return;
     }
 
-    // 4. A regular message: one agent turn, keyed by conversation id exactly like the web chat,
+    // 5. A regular message: one agent turn, keyed by conversation id exactly like the web chat,
     //    so /api/chat/cancel also cancels a Telegram turn.
     const remembered = telegram.conversationId();
     // A conversation deleted in the web UI must not wedge the chat; start a fresh one instead.
@@ -303,7 +355,12 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
     let errorReply: string | null = null;
     const approvals: PendingAction[] = [];
     try {
-      for await (const event of (await deps.runner()).chat({ conversationId, message: text, signal: controller.signal })) {
+      for await (const event of (await deps.runner()).chat({
+        conversationId,
+        message: text || "Please read the attached document and summarize what it contains.",
+        documentIds,
+        signal: controller.signal,
+      })) {
         if (event.type === "start") {
           // The web routes move their claim to the new conversation id; so do we, and remember it.
           conversationId = event.conversation_id;

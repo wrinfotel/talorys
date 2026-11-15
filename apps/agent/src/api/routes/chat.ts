@@ -87,6 +87,7 @@ chatRoutes.post("/chat", async (c) => {
         conversationId: input.conversation_id,
         message: input.message,
         retry: input.retry,
+        documentIds: input.document_ids,
         signal: controller.signal,
       })) {
         if (event.type === "start") {

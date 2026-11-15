@@ -6,6 +6,7 @@ import { errorResponse, NotFoundError } from "./errors";
 import { csrfProtection, requireSession, securityHeaders } from "./middleware";
 import { authRoutes } from "./routes/auth";
 import { aiProviderRoutes } from "./routes/ai-provider";
+import { documentRoutes } from "./routes/documents";
 import { chatRoutes } from "./routes/chat";
 import { dataRoutes } from "./routes/data";
 import { automationRoutes } from "./routes/automations";
@@ -51,6 +52,7 @@ export function createApi() {
   app.route("/", semanticRoutes);
   app.route("/", systemRoutes);
   app.route("/", aiProviderRoutes);
+  app.route("/", documentRoutes);
   app.route("/auth", authRoutes);
   app.route("/", chatRoutes);
   app.route("/", dataRoutes);

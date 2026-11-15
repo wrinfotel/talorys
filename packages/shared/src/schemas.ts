@@ -288,6 +288,19 @@ export const chatRequestSchema = z.object({
   conversation_id: id.optional(),
   message: shortText(16_000),
   retry: z.boolean().optional(),
+  /** Documents uploaded to /api/documents and attached to this turn (at most 3). */
+  document_ids: z.array(id).max(3).optional(),
+});
+
+/**
+ * A document uploaded before a chat turn: the bytes travel base64-encoded in JSON, the
+ * server extracts the text and returns a reference the chat request can attach.
+ */
+export const documentUploadSchema = z.object({
+  name: z.string().trim().min(1).max(300),
+  mime: z.string().trim().min(1).max(200),
+  /** base64 of at most 12 MB of raw bytes (≈16 MB encoded). */
+  data_base64: z.string().min(1).max(17_000_000),
 });
 
 export const automationCreateSchema = z.object({
@@ -453,6 +466,8 @@ export const backupSchema = z.object({
     notes: z.array(backupEntity({ id, title: z.string(), content: z.string(), created_at: z.string(), updated_at: isoDate })).default([]),
     projects: z.array(backupEntity({ id, name: z.string(), created_at: z.string(), updated_at: isoDate })).default([]),
     automations: z.array(backupEntity({ id, name: z.string(), kind: z.string(), schedule: z.unknown() })).default([]),
+    /** Extracted text only, never the original bytes. */
+    documents: z.array(backupEntity({ id, name: z.string(), text: z.string(), created_at: z.string() })).default([]),
     /** Connection details only: no credentials, sessions or tool choices. Imported servers arrive disabled. */
     mcp_servers: z.array(backupEntity({ id, name: z.string(), url: z.string(), auth_type: z.string() })).default([]),
   }),

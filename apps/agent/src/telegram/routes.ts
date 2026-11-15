@@ -15,6 +15,15 @@ const webhookUpdateSchema = z.object({
     .object({
       chat: z.object({ id: z.number().int() }),
       text: z.string().optional(),
+      caption: z.string().optional(),
+      document: z
+        .object({
+          file_id: z.string().min(1),
+          file_name: z.string().max(300).optional(),
+          mime_type: z.string().max(200).optional(),
+          file_size: z.number().int().optional(),
+        })
+        .optional(),
     })
     .optional(),
   callback_query: z

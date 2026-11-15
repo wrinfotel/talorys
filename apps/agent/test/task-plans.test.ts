@@ -446,7 +446,7 @@ describe("persistence", () => {
       const s = a.services;
       await propose(s, { title: "Backup", tasks: [{ title: uniq("A") }, { title: uniq("B") }] });
       const backup = exportData(s);
-      expect(Object.keys(backup.data).sort()).toEqual(["automations", "conversations", "mcp_servers", "memories", "messages", "notes", "projects", "settings", "tasks"]);
+      expect(Object.keys(backup.data).sort()).toEqual(["automations", "conversations", "documents", "mcp_servers", "memories", "messages", "notes", "projects", "settings", "tasks"]);
       expect(JSON.stringify(backup.data)).not.toContain("tal_task_plan_drafts");
     });
     const c = await loggedIn();

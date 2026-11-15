@@ -60,11 +60,16 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   return (await res.json()) as T;
 }
 
+/** Uploads a document for the next chat turn; the server extracts its text and answers with a reference. */
+export async function uploadDocument(file: { name: string; mime: string; data_base64: string }): Promise<{ id: string; name: string; chars: number }> {
+  return api("/documents", { method: "POST", body: file });
+}
+
 /**
  * POSTs a chat message and consumes the Server-Sent Events response incrementally.
  */
 export async function streamChat(
-  payload: { conversation_id?: string; message: string; retry?: boolean },
+  payload: { conversation_id?: string; message: string; retry?: boolean; document_ids?: string[] },
   onEvent: (event: ChatStreamEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {

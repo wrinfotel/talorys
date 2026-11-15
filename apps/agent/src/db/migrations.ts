@@ -397,6 +397,23 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE tal_pending_actions ADD COLUMN result TEXT`,
     ],
   },
+  {
+    version: 13,
+    name: "attached documents",
+    statements: [
+      // Documents attached to chat turns (web upload or Telegram). Only the extracted
+      // text is stored, never the original bytes; the agent reads it with read_document.
+      `CREATE TABLE tal_documents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        chars INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`,
+    ],
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
