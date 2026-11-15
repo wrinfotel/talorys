@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatStreamEvent, PendingAction, TaskPlanDraft, ToolActivity } from "@talorys/shared";
+import type { AutomationRun, ChatMessage, ChatStreamEvent, PendingAction, TaskPlanDraft, ToolActivity } from "@talorys/shared";
 import type { Services } from "../services/container";
 import { type AIProvider, classifyAiError, estimateTokens, type ProviderTool, usageOfFailure } from "../ai/provider";
 import { AppError, NotFoundError } from "../api/errors";
@@ -182,6 +182,10 @@ export class AgentRunner {
     private readonly ext?: RunnerExtensions,
     /** Tools from remote MCP servers the owner enabled. Chat only; scheduled runs never get them. */
     private readonly mcpTools: ToolDefinition[] = [],
+    /** Workers AI, passed when chat runs on a custom provider: a turn that fails before any output falls back to it. */
+    private readonly fallbackProvider: AIProvider | null = null,
+    /** "Run now" for automations, wired by the agent; tools receive it through the ToolContext. */
+    private readonly runAutomationNow?: (id: string) => Promise<AutomationRun>,
   ) {}
 
   async *chat(input: TurnInput): AsyncGenerator<ChatStreamEvent> {
@@ -298,7 +302,14 @@ export class AgentRunner {
       // never shadow one; MCP tools share the same budget, caps, validation and approvals.
       executor = new ToolExecutor(
         [...(this.ext?.tools ?? ALL_TOOLS), ...this.mcpTools],
-        { services: s, timezone: settings.timezone, mode: "chat", conversationId: conversation.id, signal: input.signal },
+        {
+          services: s,
+          timezone: settings.timezone,
+          mode: "chat",
+          conversationId: conversation.id,
+          signal: input.signal,
+          ...(this.runAutomationNow ? { runAutomationNow: this.runAutomationNow } : {}),
+        },
         { maxToolCalls: limits.maxToolCalls },
       );
       const providerTools = toProviderTools(executor);
@@ -306,7 +317,7 @@ export class AgentRunner {
 
       // Memory selection and summarizing may have spent budget since the first check.
       if (!s.usage.reserveAi(limits)) throw aiLimitReached(limits.maxAiRequestsPerDay);
-      for await (const event of withLeakedToolRecovery(this.provider, {
+      const request = {
         system,
         messages: window.messages,
         tools: providerTools,
@@ -316,33 +327,64 @@ export class AgentRunner {
         toolBudgetExhausted: () => turnTools.budgetExhausted(),
         reserveNextStep: () => s.usage.reserveAi(limits),
         signal: input.signal,
-      })) {
-        if (event.type === "text") {
-          text += event.delta;
-          yield { type: "text", delta: event.delta };
-        } else if (event.type === "tool-start") {
-          const activity: ToolActivity = {
-            id: event.id,
-            name: event.name,
-            label: toolLabel(turnTools.find(event.name), event.name, event.input),
-            status: "running",
-          };
-          tools.push(activity);
-          yield { type: "tool", tool: { ...activity } };
-        } else if (event.type === "tool-end") {
-          const activity = tools.find((t) => t.id === event.id);
-          if (activity) {
-            activity.status = event.error ? "error" : "success";
-            if (event.error) activity.error = event.error.slice(0, 300);
-            const approval = turnTools.approvalFor(event.id);
-            if (approval) activity.approval = approval;
-            const planId = turnTools.planFor(event.id);
-            const plan = planId ? s.taskPlans.get(planId) : null;
-            if (plan) activity.plan = plan;
-            yield { type: "tool", tool: { ...activity } };
+      };
+      // A custom provider that fails before anything was streamed falls back to Workers AI
+      // for the rest of this turn; the next turn resolves the configured provider again.
+      // Once anything was emitted (text, a tool call, usage), a failure is not retried —
+      // restarting the provider loop would re-run tools and duplicate already-shown text.
+      let activeProvider: AIProvider = this.provider;
+      let emitted = false;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          for await (const event of withLeakedToolRecovery(activeProvider, request)) {
+            emitted = true;
+            if (event.type === "text") {
+              text += event.delta;
+              yield { type: "text", delta: event.delta };
+            } else if (event.type === "tool-start") {
+              const activity: ToolActivity = {
+                id: event.id,
+                name: event.name,
+                label: toolLabel(turnTools.find(event.name), event.name, event.input),
+                status: "running",
+              };
+              tools.push(activity);
+              yield { type: "tool", tool: { ...activity } };
+            } else if (event.type === "tool-end") {
+              const activity = tools.find((t) => t.id === event.id);
+              if (activity) {
+                activity.status = event.error ? "error" : "success";
+                if (event.error) activity.error = event.error.slice(0, 300);
+                const approval = turnTools.approvalFor(event.id);
+                if (approval) activity.approval = approval;
+                const planId = turnTools.planFor(event.id);
+                const plan = planId ? s.taskPlans.get(planId) : null;
+                if (plan) activity.plan = plan;
+                yield { type: "tool", tool: { ...activity } };
+              }
+            } else if (event.type === "usage") {
+              s.usage.record(event.usage);
+            }
           }
-        } else if (event.type === "usage") {
-          s.usage.record(event.usage);
+          break;
+        } catch (error) {
+          const canFallback =
+            attempt === 0 &&
+            !emitted &&
+            !input.signal.aborted &&
+            this.fallbackProvider !== null &&
+            this.fallbackProvider.id !== activeProvider.id &&
+            activeProvider.id !== "unavailable";
+          if (!canFallback) throw error;
+          console.warn(
+            `AI provider ${activeProvider.id} (${activeProvider.model}) failed before any output; falling back to ${this.fallbackProvider.id} (${this.fallbackProvider.model})`,
+            error,
+          );
+          s.activity.record(
+            "ai.fallback",
+            `The configured AI provider (${activeProvider.model}) could not answer; this reply was generated with the fallback model ${this.fallbackProvider.model}.`,
+          );
+          activeProvider = this.fallbackProvider;
         }
       }
       s.usage.increment({ tool_calls: turnTools.callCount });

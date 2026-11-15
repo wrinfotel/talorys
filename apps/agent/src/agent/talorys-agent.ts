@@ -106,7 +106,13 @@ export class TalorysAgent extends Agent<Env, AgentState> {
       return new OpenAICompatibleProvider({ baseUrl: custom.baseUrl, apiKey, model: custom.model });
     }
     if (!this.env.AI) return null;
-    return new CloudflareWorkersAIProvider(this.env.AI, settings.model);
+    return this.workersAiProvider();
+  }
+
+  /** Workers AI on the settings model; the always-available fallback for custom-provider chat turns. */
+  private workersAiProvider(): CloudflareWorkersAIProvider | null {
+    if (!this.env.AI) return null;
+    return new CloudflareWorkersAIProvider(this.env.AI, this.services.settings.get().model);
   }
 
   /**
@@ -138,11 +144,20 @@ export class TalorysAgent extends Agent<Env, AgentState> {
   }
 
   async runner(): Promise<AgentRunner> {
+    const provider = await this.aiProvider();
+    // When chat runs on a custom provider, a turn that fails before answering falls back
+    // to Workers AI (the default stays the default); nothing is persisted, so the next
+    // turn tries the custom provider again. An unreadable key stays a hard error on purpose.
+    const settings = this.services.settings.get();
+    const fallback =
+      provider && provider.id !== "unavailable" && settings.aiProvider && settings.aiProvider.disabled !== true ? this.workersAiProvider() : null;
     return new AgentRunner(
       this.services,
-      await this.aiProvider(),
+      provider,
       semanticExtensions(this.services, this.env, (work) => this.ctx.waitUntil(work)),
       this.services.mcp.chatTools(),
+      fallback,
+      (id) => this.runAutomationNow(id),
     );
   }
 

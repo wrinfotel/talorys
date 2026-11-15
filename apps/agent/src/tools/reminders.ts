@@ -101,6 +101,64 @@ export const reminderTools = [
     },
   }),
   defineTool({
+    name: "run_automation",
+    description:
+      "Run a reminder or automation right now, without waiting for its schedule ('water the plants now', 'give me today's digest'). Returns the run's result.",
+    permission: "write",
+    maxCallsPerTurn: 2,
+    input: z.object({ id: z.string().min(1) }),
+    label: () => `Running a schedule on demand`,
+    execute: async (i, ctx) => {
+      const a = ctx.services.automations.get(i.id);
+      if (!a) throw new ToolError("Automation not found.");
+      if (!ctx.runAutomationNow) throw new ToolError("Running on demand is not available here.");
+      const run = await ctx.runAutomationNow(i.id);
+      return {
+        automation: {
+          id: a.id,
+          name: a.name,
+          status: run.status,
+          result: run.result ?? run.error,
+          next_run: formatLocal(a.next_run, ctx.timezone),
+        },
+      };
+    },
+  }),
+  defineTool({
+    name: "edit_automation",
+    description:
+      "Change an existing reminder or automation: rename it, change its message or AI prompt, reschedule it, or pause/resume it (enabled: false pauses). The id comes from list_automations.",
+    permission: "write",
+    maxCallsPerTurn: 3,
+    input: z.object({
+      id: z.string().min(1),
+      name: z.string().min(1).max(200).optional(),
+      message: z.string().min(1).max(2000).optional(),
+      schedule: scheduleSpecSchema.optional(),
+      enabled: z.boolean().optional(),
+    }),
+    label: () => `Updating a schedule`,
+    execute: async (i, ctx) => {
+      const a = ctx.services.automations.get(i.id);
+      if (!a) throw new ToolError("Automation not found.");
+      const next = await ctx.services.automations.update(i.id, {
+        ...(i.name !== undefined ? { name: i.name } : {}),
+        ...(i.message !== undefined ? { message: i.message } : {}),
+        ...(i.schedule !== undefined ? { schedule: i.schedule } : {}),
+        ...(i.enabled !== undefined ? { enabled: i.enabled } : {}),
+      });
+      return {
+        automation: {
+          id: next.id,
+          name: next.name,
+          schedule: next.schedule_description,
+          enabled: next.enabled,
+          next_run: formatLocal(next.next_run, ctx.timezone),
+        },
+      };
+    },
+  }),
+  defineTool({
     name: "notify_owner",
     description: "Post a message to the owner's notification center. Use in scheduled runs to deliver results.",
     permission: "write",

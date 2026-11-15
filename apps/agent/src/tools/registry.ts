@@ -1,4 +1,4 @@
-import type { PendingAction } from "@talorys/shared";
+import type { AutomationRun, PendingAction } from "@talorys/shared";
 import { AppError, NotFoundError } from "../api/errors";
 import type { z } from "zod";
 import type { Services } from "../services/container";
@@ -14,6 +14,8 @@ export interface ToolContext {
   conversationId?: string;
   /** Aborts when the owner stops the turn; tools that wait on the network should honour it. */
   signal?: AbortSignal;
+  /** "Run now" hook for automations, wired by the agent in chat turns; a scheduled run never gets it. */
+  runAutomationNow?: (id: string) => Promise<AutomationRun>;
 }
 
 /** The exact target of a destructive call, resolved before anything changes. */
