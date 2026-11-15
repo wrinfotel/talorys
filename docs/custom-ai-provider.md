@@ -62,6 +62,10 @@ Provider failures are classified into readable messages instead of raw HTTP dump
 | Model not available (404 or unknown-model text) | "The configured model is not available on the custom provider. Check it in Settings → AI." |
 | Anything else | A general "could not respond" message; details are logged on the server. |
 
+## Fallback to Workers AI
+
+If the custom provider fails before answering, or a turn (or a scheduled automation run, including "Run now") completes without any text, that one turn or run is retried on Cloudflare Workers AI so the reply or notification still arrives. The switch is recorded in the activity feed; the next request tries the custom provider again. A failure after a reply has partially streamed is not retried — the turn reports the provider's error instead of duplicating what was already shown.
+
 If the stored key cannot be decrypted (for example after restoring a backup or rotating the `MCP_CREDENTIAL_KEY` secret), chat fails with an explicit "re-save the API key" error — Talorys never silently falls back to Workers AI while a custom provider is configured.
 
 ## How the key is stored

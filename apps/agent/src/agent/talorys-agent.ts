@@ -145,9 +145,10 @@ export class TalorysAgent extends Agent<Env, AgentState> {
 
   async runner(): Promise<AgentRunner> {
     const provider = await this.aiProvider();
-    // When chat runs on a custom provider, a turn that fails before answering falls back
-    // to Workers AI (the default stays the default); nothing is persisted, so the next
-    // turn tries the custom provider again. An unreadable key stays a hard error on purpose.
+    // When chat or a scheduled run uses a custom provider, a turn that answers with nothing
+    // usable falls back to Workers AI (the default stays the default); nothing is persisted,
+    // so the next turn tries the custom provider again. An unreadable key stays a hard error
+    // on purpose.
     const settings = this.services.settings.get();
     const fallback =
       provider && provider.id !== "unavailable" && settings.aiProvider && settings.aiProvider.disabled !== true ? this.workersAiProvider() : null;

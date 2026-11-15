@@ -184,7 +184,8 @@ export class AgentRunner {
     private readonly ext?: RunnerExtensions,
     /** Tools from remote MCP servers the owner enabled. Chat only; scheduled runs never get them. */
     private readonly mcpTools: ToolDefinition[] = [],
-    /** Workers AI, passed when chat runs on a custom provider: a turn that fails before any output falls back to it. */
+    /** Workers AI, passed when chat runs on a custom provider: a turn or scheduled run that
+     * answers with nothing usable falls back to it, for that turn or run only. */
     private readonly fallbackProvider: AIProvider | null = null,
     /** "Run now" for automations, wired by the agent; tools receive it through the ToolContext. */
     private readonly runAutomationNow?: (id: string) => Promise<AutomationRun>,
@@ -362,20 +363,23 @@ export class AgentRunner {
         reserveNextStep: () => s.usage.reserveAi(limits),
         signal: input.signal,
       };
-      // A custom provider that fails before anything was streamed falls back to Workers AI
-      // for the rest of this turn; the next turn resolves the configured provider again.
-      // Once anything was emitted (text, a tool call, usage), a failure is not retried —
+      // A custom provider that answers with nothing usable falls back to Workers AI for the
+      // rest of this turn; the next turn resolves the configured provider again. "Nothing
+      // usable" is a hard failure or an empty success (usage but no text and no tool call).
+      // Once anything was emitted (text or a started tool call), a failure is not retried —
       // restarting the provider loop would re-run tools and duplicate already-shown text.
       let activeProvider: AIProvider = this.provider;
       let emitted = false;
       for (let attempt = 0; ; attempt++) {
+        let failed: unknown = null;
         try {
           for await (const event of withLeakedToolRecovery(activeProvider, request)) {
-            emitted = true;
             if (event.type === "text") {
+              emitted = true;
               text += event.delta;
               yield { type: "text", delta: event.delta };
             } else if (event.type === "tool-start") {
+              emitted = true;
               const activity: ToolActivity = {
                 id: event.id,
                 name: event.name,
@@ -400,26 +404,29 @@ export class AgentRunner {
               s.usage.record(event.usage);
             }
           }
-          break;
         } catch (error) {
-          const canFallback =
-            attempt === 0 &&
-            !emitted &&
-            !input.signal.aborted &&
-            this.fallbackProvider !== null &&
-            this.fallbackProvider.id !== activeProvider.id &&
-            activeProvider.id !== "unavailable";
-          if (!canFallback) throw error;
-          console.warn(
-            `AI provider ${activeProvider.id} (${activeProvider.model}) failed before any output; falling back to ${this.fallbackProvider.id} (${this.fallbackProvider.model})`,
-            error,
-          );
-          s.activity.record(
-            "ai.fallback",
-            `The configured AI provider (${activeProvider.model}) could not answer; this reply was generated with the fallback model ${this.fallbackProvider.model}.`,
-          );
-          activeProvider = this.fallbackProvider;
+          failed = error;
         }
+        const canFallback =
+          attempt === 0 &&
+          !emitted &&
+          !input.signal.aborted &&
+          this.fallbackProvider !== null &&
+          this.fallbackProvider.id !== activeProvider.id &&
+          activeProvider.id !== "unavailable";
+        if (!canFallback) {
+          if (failed !== null) throw failed;
+          break;
+        }
+        console.warn(
+          `AI provider ${activeProvider.id} (${activeProvider.model}) ${failed === null ? "streamed no output" : "failed before any output"}; falling back to ${this.fallbackProvider.id} (${this.fallbackProvider.model})`,
+          failed,
+        );
+        s.activity.record(
+          "ai.fallback",
+          `The configured AI provider (${activeProvider.model}) could not answer; this reply was generated with the fallback model ${this.fallbackProvider.model}.`,
+        );
+        activeProvider = this.fallbackProvider;
       }
       s.usage.increment({ tool_calls: turnTools.callCount });
 
@@ -452,11 +459,6 @@ export class AgentRunner {
     const s = this.services;
     const settings = s.settings.get();
     if (!this.provider) throw new AppError("AI_UNAVAILABLE", "Workers AI is not configured.");
-    const executor = new ToolExecutor(
-      this.ext?.tools ?? ALL_TOOLS,
-      { services: s, timezone: settings.timezone, mode: "scheduled" },
-      { maxToolCalls: Math.min(settings.limits.maxToolCalls, 10) },
-    );
     const system = buildSystemPrompt({
       agentName: settings.agentName,
       timezone: settings.timezone,
@@ -468,41 +470,82 @@ export class AgentRunner {
       ),
       scheduled: true,
     });
-    const providerTools = toProviderTools(executor);
-    let text = "";
     // Reserved after the awaits above, so a run started just before the budget ran out cannot overrun it.
     if (!s.usage.reserveScheduledAi(settings.limits)) throw aiLimitReached(settings.limits.maxAiRequestsPerDay);
+    // A custom provider that answers with nothing usable — it fails, or the run ends without
+    // text — falls back to Workers AI for this whole run. A scheduled run streams to nobody
+    // and its tools are read-only, so restarting is invisible and cannot change anything;
+    // the next run resolves the configured provider again.
+    const fallback = this.fallbackProvider;
+    let activeProvider: AIProvider = this.provider;
+    let text = "";
     // Whether the per-round budget ran out mid-run: without this flag the run would end
     // "(No output)", indistinguishable from a model that never wrote prose.
     let budgetStarved = false;
-    try {
-      for await (const event of withLeakedToolRecovery(this.provider, {
-        system,
-        messages: [{ role: "user", content: prompt }],
-        tools: providerTools,
-        maxIterations: Math.min(settings.limits.maxAgentIterations, 10),
-        // Generous per-round cap: reasoning models spend output tokens thinking before
-        // any content, and a tight cap turns a scheduled run into "(No output)".
-        maxOutputTokens: Math.min(settings.limits.maxOutputTokens, 2000),
-        temperature: settings.temperature,
-        toolBudgetExhausted: () => executor.budgetExhausted(),
-        reserveNextStep: () => {
-          const ok = s.usage.reserveAi(settings.limits);
-          if (!ok) budgetStarved = true;
-          return ok;
-        },
-        signal,
-      })) {
-        if (event.type === "text") text += event.delta;
-        if (event.type === "usage") {
-          s.usage.record(event.usage);
+    let toolCalls = 0;
+    for (let attempt = 0; ; attempt++) {
+      // A fresh executor per attempt: the per-run tool budget and duplicate-call detection
+      // start over when the whole prompt runs again.
+      const executor = new ToolExecutor(
+        this.ext?.tools ?? ALL_TOOLS,
+        { services: s, timezone: settings.timezone, mode: "scheduled" },
+        { maxToolCalls: Math.min(settings.limits.maxToolCalls, 10) },
+      );
+      let failed: unknown = null;
+      try {
+        for await (const event of withLeakedToolRecovery(activeProvider, {
+          system,
+          messages: [{ role: "user", content: prompt }],
+          tools: toProviderTools(executor),
+          maxIterations: Math.min(settings.limits.maxAgentIterations, 10),
+          // Generous per-round cap: reasoning models spend output tokens thinking before
+          // any content, and a tight cap turns a scheduled run into "(No output)".
+          maxOutputTokens: Math.min(settings.limits.maxOutputTokens, 2000),
+          temperature: settings.temperature,
+          toolBudgetExhausted: () => executor.budgetExhausted(),
+          reserveNextStep: () => {
+            const ok = s.usage.reserveAi(settings.limits);
+            if (!ok) budgetStarved = true;
+            return ok;
+          },
+          signal,
+        })) {
+          if (event.type === "text") text += event.delta;
+          if (event.type === "usage") {
+            s.usage.record(event.usage);
+          }
         }
+      } catch (error) {
+        failed = error;
       }
-    } catch (error) {
-      s.usage.increment({ ai_errors: 1 });
-      throw classifyAiError(error);
+      toolCalls += executor.callCount;
+      const canFallback =
+        attempt === 0 &&
+        !budgetStarved &&
+        !signal?.aborted &&
+        !stripToolMarkup(text).trim() &&
+        fallback !== null &&
+        fallback.id !== activeProvider.id &&
+        activeProvider.id !== "unavailable";
+      if (!canFallback) {
+        if (failed !== null) {
+          s.usage.increment({ ai_errors: 1 });
+          throw classifyAiError(failed);
+        }
+        break;
+      }
+      console.warn(
+        `AI provider ${activeProvider.id} (${activeProvider.model}) ${failed === null ? "streamed no output" : "failed"} for a scheduled run; falling back to ${fallback.id} (${fallback.model})`,
+        failed,
+      );
+      s.activity.record(
+        "ai.fallback",
+        `The configured AI provider (${activeProvider.model}) could not answer; this run was generated with the fallback model ${fallback.model}.`,
+      );
+      text = "";
+      activeProvider = fallback;
     }
-    s.usage.increment({ tool_calls: executor.callCount });
+    s.usage.increment({ tool_calls: toolCalls });
     return (
       stripToolMarkup(text).trim() ||
       (budgetStarved ? "Stopped mid-run: the daily AI budget ran out. Adjust it in Settings → AI." : "(No output)")
