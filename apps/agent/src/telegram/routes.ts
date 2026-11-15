@@ -8,13 +8,25 @@ import { agentDeps, processUpdate } from "./handler";
 
 /**
  * The parts of a Telegram update Talorys reacts to; unknown fields are stripped.
- * Updates without a text message are ignored by the handler.
+ * Updates without a text message or a callback query are ignored by the handler.
  */
 const webhookUpdateSchema = z.object({
   message: z
     .object({
       chat: z.object({ id: z.number().int() }),
       text: z.string().optional(),
+    })
+    .optional(),
+  callback_query: z
+    .object({
+      id: z.string().min(1),
+      data: z.string().min(1).max(100),
+      message: z
+        .object({
+          chat: z.object({ id: z.number().int() }),
+          message_id: z.number().int(),
+        })
+        .optional(),
     })
     .optional(),
 });

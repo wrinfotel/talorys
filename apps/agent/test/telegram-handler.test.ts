@@ -5,7 +5,7 @@ import type { TalorysAgent } from "../src/agent/talorys-agent";
 import type { AgentRunner } from "../src/agent/runner";
 import { SecretBox } from "../src/services/secret-box";
 import { agentDeps, processUpdate, type TelegramUpdate } from "../src/telegram/handler";
-import { inAgent } from "./helpers";
+import { inAgent, proposeAction } from "./helpers";
 
 const TOKEN = "123456:AAQ-example-token_abcdef";
 const CHAT = 100;
@@ -427,6 +427,94 @@ describe("telegram turn replies", () => {
       } as unknown as AgentRunner;
       await expect(processUpdate({ services: agent.services, runner: async () => runner, activeRuns: agent.activeRuns }, update("hello"))).resolves.toBeUndefined();
       expect(replies(api)).toEqual(["Something went wrong."]);
+    });
+  });
+});
+
+describe("telegram approval buttons", () => {
+  const approval = {
+    id: "act-1",
+    summary: "Delete task \u201cBuy milk\u201d",
+    status: "pending" as const,
+    error: null,
+    expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+  };
+
+  const callbackUpdate = (data: string, chatId = CHAT, callbackId = "cb-1"): TelegramUpdate => ({
+    callback_query: { id: callbackId, data, message: { chat: { id: chatId }, message_id: 500 } },
+  });
+
+  const callsOf = (api: ReturnType<typeof happy>, method: string) => api.sent.filter((c) => c.url.endsWith(`/${method}`));
+
+  it("attaches Approve/Cancel buttons to a reply that proposed an action", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      const events: ChatStreamEvent[] = [
+        start("c1"),
+        { type: "tool", tool: { id: "c1", name: "delete_task", label: "Proposing to delete \u201cBuy milk\u201d", status: "success", approval } },
+        { type: "text", delta: "Shall I delete it?" },
+      ];
+      await processUpdate({ services: agent.services, runner: async () => fakeRunner(events), activeRuns: agent.activeRuns }, update("delete the milk task"));
+      const send = callsOf(api, "sendMessage").at(-1)!;
+      expect(send.body.reply_markup).toEqual({
+        inline_keyboard: [
+          [
+            { text: "✅ Approve", callback_data: "approve:act-1" },
+            { text: "✖ Cancel", callback_data: "cancel:act-1" },
+          ],
+        ],
+      });
+    });
+  });
+
+  it("approves the action from the button: it runs once, the keyboard goes, the outcome is sent", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      const s = agent.services;
+      s.telegram.setPaired(CHAT);
+      const task = s.tasks.create({ title: "Buy milk" });
+      const actionId = await proposeAction(s, "delete_task", { task: "Buy milk" });
+
+      await processUpdate(agentDeps(agent), callbackUpdate(`approve:${actionId}`));
+
+      // The task is really gone and the press was acknowledged.
+      expect(s.tasks.get(task.id)).toBeNull();
+      const toast = callsOf(api, "answerCallbackQuery").at(-1)!;
+      expect(toast.body).toMatchObject({ callback_query_id: "cb-1", text: "Done" });
+      expect(callsOf(api, "editMessageReplyMarkup")).toHaveLength(1);
+      const outcome = callsOf(api, "sendMessage").at(-1)!;
+      expect(outcome.body.text).toContain("Done: Delete task");
+      // The second press finds a handled action and says so instead of failing.
+      await processUpdate(agentDeps(agent), callbackUpdate(`approve:${actionId}`, CHAT, "cb-2"));
+      expect(callsOf(api, "answerCallbackQuery").at(-1)!.body.text).toContain("already handled");
+    });
+  });
+
+  it("cancels from the button: nothing runs and the proposal is declined", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      const s = agent.services;
+      s.telegram.setPaired(CHAT);
+      const task = s.tasks.create({ title: "Buy milk" });
+      const actionId = await proposeAction(s, "delete_task", { task: "Buy milk" });
+
+      await processUpdate(agentDeps(agent), callbackUpdate(`cancel:${actionId}`));
+
+      expect(s.tasks.get(task.id)).not.toBeNull();
+      expect(callsOf(api, "answerCallbackQuery").at(-1)!.body.text).toBe("Cancelled");
+      expect(callsOf(api, "sendMessage").at(-1)!.body.text).toContain("Cancelled: Delete task");
+    });
+  });
+
+  it("ignores button presses from any other chat and unknown payloads", async () => {
+    await inAgent(async (agent) => {
+      const api = await connected(agent);
+      agent.services.telegram.setPaired(CHAT);
+      await processUpdate(agentDeps(agent), callbackUpdate("approve:act-x", 999));
+      await processUpdate(agentDeps(agent), callbackUpdate("make-me-a-sandwich"));
+      expect(callsOf(api, "answerCallbackQuery")).toHaveLength(1); // only the unknown-payload answer for the owner
+      expect(callsOf(api, "sendMessage")).toHaveLength(0);
     });
   });
 });

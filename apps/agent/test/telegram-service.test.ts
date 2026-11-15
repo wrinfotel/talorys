@@ -98,7 +98,7 @@ describe("telegram service", () => {
       ]);
       expect(api.sent[1]!.body).toMatchObject({
         url: "https://me.pages.dev/api/telegram/webhook",
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
         drop_pending_updates: true,
       });
       // Telegram only accepts secrets from [-_A-Za-z0-9]; randomToken is base64url, 43 characters.
@@ -387,6 +387,46 @@ describe("telegram service", () => {
       expect(sends).toHaveLength(1);
       expect(sends[0]!.body).toEqual({ chat_id: 100, parse_mode: "HTML", text: "<b>Reminder</b>\n\n<b>Call</b> the dentist" });
       expect(n.id).toEqual(expect.any(String));
+    });
+  });
+
+  it("re-registers the webhook with the widened update list when the stored version is older", async () => {
+    await inAgent(async (agent) => {
+      const api = happy();
+      const t = makeTelegram(agent, api.fetcher);
+      await t.connect(TOKEN, "https://me.pages.dev");
+      // A bot connected by a previous version stores an older marker.
+      const config = t.settings.getJson<Record<string, unknown>>("telegram.config");
+      t.settings.setJson("telegram.config", { ...config, commands_version: "3" });
+      api.sent.length = 0;
+      t.ensureCommandsInBackground();
+      await t.idle();
+      const webhook = api.sent.find((c) => c.url.endsWith("/setWebhook"));
+      expect(webhook?.body).toMatchObject({
+        url: "https://me.pages.dev/api/telegram/webhook",
+        allowed_updates: ["message", "callback_query"],
+      });
+      // A refresh must never drop updates that arrived while it ran.
+      expect(webhook?.body.drop_pending_updates).toBeUndefined();
+      expect(api.sent.filter((c) => c.url.endsWith("/setMyCommands"))).toHaveLength(2);
+      expect(t.commandsRegistered()).toBe(true);
+    });
+  });
+
+  it("attaches an inline keyboard only to the last chunk of a long reply", async () => {
+    await inAgent(async (agent) => {
+      const api = happy();
+      const t = makeTelegram(agent, api.fetcher);
+      await t.connect(TOKEN, "https://me.pages.dev");
+      t.setPaired(100);
+      const keyboard = { inline_keyboard: [[{ text: "✅ Approve", callback_data: "approve:act-1" }]] };
+      await t.sendMessage(100, `${"a".repeat(3000)}\n${"b".repeat(3000)}`, { replyMarkup: keyboard });
+      const sends = api.sent.filter((c) => c.url.endsWith("/sendMessage"));
+      expect(sends.length).toBeGreaterThanOrEqual(2);
+      for (const [i, send] of sends.entries()) {
+        if (i < sends.length - 1) expect(send.body.reply_markup).toBeUndefined();
+        else expect(send.body.reply_markup).toEqual(keyboard);
+      }
     });
   });
 });

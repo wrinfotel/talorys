@@ -55,11 +55,15 @@ const BOT_COMMANDS = [
   { command: "help", en: "What this bot can do", ru: "Что умеет этот бот" },
 ] as const;
 
+/** The update types the webhook receives; callback_query carries the approval buttons. */
+const ALLOWED_UPDATES = ["message", "callback_query"] as const;
+
 /**
- * Bumped whenever BOT_COMMANDS changes: bots whose stored menu version differs re-register
- * on their next message, so already-connected bots pick up new commands without reconnecting.
+ * Bumped whenever BOT_COMMANDS or the webhook registration changes: bots whose stored
+ * version differs re-register both on their next message, so already-connected bots pick
+ * up new commands (and a widened update list) without reconnecting.
  */
-const COMMANDS_VERSION = "3";
+const COMMANDS_VERSION = "4";
 
 /**
  * Markdown for a Telegram notification: the title in bold over the body. Unlike push
@@ -192,7 +196,7 @@ export class TelegramService {
     await this.apiCall(token, "setWebhook", {
       url: `${webhookBaseUrl.replace(/\/+$/, "")}/api/telegram/webhook`,
       secret_token: webhookSecret,
-      allowed_updates: ["message"],
+      allowed_updates: ALLOWED_UPDATES,
       drop_pending_updates: true,
     });
     // SetWebhook is validated before anything is stored, so a bad URL leaves no half-connected state.
@@ -206,7 +210,8 @@ export class TelegramService {
       allowed_chat_id: null,
       notify_enabled: true,
     });
-    await this.ensureCommands();
+    // Connect itself already registered the fresh webhook; only the menu is missing.
+    await this.ensureCommands(true);
     this.issuePairing();
     return this.status();
   }
@@ -267,11 +272,26 @@ export class TelegramService {
     this.background(work);
   }
 
-  private async ensureCommands(): Promise<void> {
+  private async ensureCommands(skipWebhook = false): Promise<void> {
     const config = this.config();
     if (!config || config.commands_version === COMMANDS_VERSION) return;
     try {
-      await this.setCommands();
+      const token = await this.token();
+      if (!token) return;
+      // A new version can also change the webhook registration (e.g. a widened
+      // allowed_updates list), so an already-connected bot picks up both on its next
+      // message, without reconnecting. Pending updates survive the refresh.
+      if (!skipWebhook) {
+        const secret = await this.webhookSecret();
+        if (secret) {
+          await this.apiCall(token, "setWebhook", {
+            url: `${config.webhook_base_url.replace(/\/+$/, "")}/api/telegram/webhook`,
+            secret_token: secret,
+            allowed_updates: ALLOWED_UPDATES,
+          });
+        }
+      }
+      await this.setCommands(token);
     } catch (error) {
       console.warn("Telegram command menu registration failed", error instanceof Error ? error.message : String(error));
       return;
@@ -280,9 +300,7 @@ export class TelegramService {
   }
 
   /** Two setMyCommands calls: the English default, then the Russian override for ru clients. */
-  private async setCommands(): Promise<void> {
-    const token = await this.token();
-    if (!token) return;
+  private async setCommands(token: string): Promise<void> {
     const commands = (lang: "en" | "ru") => BOT_COMMANDS.map(({ command, en, ru }) => ({ command, description: lang === "ru" ? ru : en }));
     await this.apiCall(token, "setMyCommands", { commands: commands("en") });
     await this.apiCall(token, "setMyCommands", { commands: commands("ru"), language_code: "ru" });
@@ -324,11 +342,18 @@ export class TelegramService {
   }
 
   /** Sends one chat message, splitting anything over Telegram's 4096-character limit. */
-  async sendMessage(chatId: number, text: string, opts: { token?: string; html?: boolean } = {}): Promise<void> {
+  async sendMessage(
+    chatId: number,
+    text: string,
+    opts: { token?: string; html?: boolean; replyMarkup?: Record<string, unknown> } = {},
+  ): Promise<void> {
     const bearer = opts.token ?? (await this.token());
     if (!bearer) return;
-    for (const chunk of opts.html ? telegramHtmlChunks(text) : splitMessage(text)) {
-      await this.sendChunk(bearer, chatId, chunk, opts.html === true);
+    const chunks = opts.html ? telegramHtmlChunks(text) : splitMessage(text);
+    for (let i = 0; i < chunks.length; i++) {
+      // Buttons belong to the reply as a whole: only the last chunk carries the keyboard.
+      const replyMarkup = i === chunks.length - 1 ? opts.replyMarkup : undefined;
+      await this.sendChunk(bearer, chatId, chunks[i]!, opts.html === true, replyMarkup);
     }
   }
 
@@ -336,14 +361,37 @@ export class TelegramService {
    * One chunk of a chat message. HTML chunks are sent with parse_mode so bold, code and
    * links render; a chunk Telegram refuses to parse still gets delivered, just unformatted.
    */
-  private async sendChunk(token: string, chatId: number, text: string, html: boolean): Promise<void> {
+  private async sendChunk(token: string, chatId: number, text: string, html: boolean, replyMarkup?: Record<string, unknown>): Promise<void> {
     try {
-      await this.apiCall(token, "sendMessage", html ? { chat_id: chatId, text, parse_mode: "HTML" } : { chat_id: chatId, text });
+      await this.apiCall(token, "sendMessage", {
+        chat_id: chatId,
+        text,
+        ...(html ? { parse_mode: "HTML" } : {}),
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!html || !/parse/i.test(message)) throw error;
       console.warn("Telegram HTML message fell back to plain text", message);
-      await this.apiCall(token, "sendMessage", { chat_id: chatId, text });
+      await this.apiCall(token, "sendMessage", { chat_id: chatId, text, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) });
+    }
+  }
+
+  /** Answers a button press: stops Telegram's spinner and, with text, shows a short toast. */
+  async answerCallbackQuery(callbackId: string, text?: string): Promise<void> {
+    const token = await this.token();
+    if (!token) return;
+    await this.apiCall(token, "answerCallbackQuery", { callback_query_id: callbackId, ...(text ? { text } : {}) });
+  }
+
+  /** Removes the inline keyboard from the reply that carried it, so stale buttons can't be pressed twice. Best-effort. */
+  async clearReplyMarkup(chatId: number, messageId: number): Promise<void> {
+    const token = await this.token();
+    if (!token) return;
+    try {
+      await this.apiCall(token, "editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } });
+    } catch (error) {
+      console.warn("Telegram clearReplyMarkup failed", error instanceof Error ? error.message : String(error));
     }
   }
 

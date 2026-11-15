@@ -72,6 +72,13 @@ it to Telegram's own markup, so bold, italic, code blocks, links and
 paragraphs look right. A message Telegram refuses to parse still arrives, just
 as plain text.
 
+**Approvals in the chat.** When a turn proposes a change that needs your OK
+(deleting a task, rewriting a note, calling an external tool), the reply
+carries **Approve / Cancel** buttons. Tapping one runs the exact same
+at-most-once path as the button in the web app: the result comes back as a
+short message, stale buttons disappear, and a second press only says
+"already handled". Proposals expire after 30 minutes, like in the web UI.
+
 ### The "/" command menu
 
 Connecting the bot also registers its commands with Telegram, so the menu
@@ -97,6 +104,9 @@ a very long body clipped. Turn the toggle off to keep the bot chat-only.
 - The bot token and the webhook secret are stored encrypted at rest (AES-256-GCM,
   keyed by the deployment's `MCP_CREDENTIAL_KEY` secret) and are never shown
   again or sent to the AI model.
+- Approval buttons work only in the paired chat, and approving from Telegram
+  runs the same checks as the web: the action is claimed at most once and only
+  if the target hasn't changed since it was proposed.
 - The bot's non-secret state (bot username, webhook base URL, the linked chat
   id, the notification toggle and a pending pairing code) is stored unencrypted
   in the agent's database; none of it is sensitive.

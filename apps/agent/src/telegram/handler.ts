@@ -1,6 +1,8 @@
+import type { PendingAction } from "@talorys/shared";
 import type { TalorysAgent } from "../agent/talorys-agent";
 import { type AgentRunner, compactConversation, contextView } from "../agent/runner";
 import type { AIProvider } from "../ai/provider";
+import { ALL_TOOLS, runApprovedAction } from "../tools";
 import type { Services } from "../services/container";
 import { clip } from "../services/text";
 
@@ -10,8 +12,16 @@ export interface TelegramUpdateMessage {
   text?: string;
 }
 
+/** A press on an inline keyboard button attached to a reply that proposed an action. */
+export interface TelegramCallbackQuery {
+  id: string;
+  data: string;
+  message?: { chat: { id: number }; message_id: number };
+}
+
 export interface TelegramUpdate {
   message?: TelegramUpdateMessage;
+  callback_query?: TelegramCallbackQuery;
 }
 
 /** Everything the handler needs from the agent; a real TalorysAgent satisfies it directly. */
@@ -41,6 +51,7 @@ const HELP_REPLY = [
   "/compact — fold older messages into the conversation summary to free context.",
   "/status — the model I'm running on, and whether web search and notifications are on.",
   "/help — this text.",
+  "When I propose a change that needs your OK, the reply carries Approve / Cancel buttons — tap one, no need to open the app.",
   "Reminders and automation results are also delivered to this chat while notifications are on.",
 ].join("\n");
 const AI_ERROR_REPLY = "The AI model could not respond. Try again in a moment.";
@@ -148,12 +159,60 @@ async function statusReply(deps: UpdateHandlerDeps): Promise<string> {
   ].join("\n");
 }
 
+const CALLBACK_ACTION = /^(approve|cancel):([A-Za-z0-9-]{1,64})$/;
+
+/**
+ * A button press on a reply that proposed a destructive action. The same at-most-once
+ * `runApprovedAction` path the web approval card uses decides the outcome; the AI learns
+ * it on the next turn from the conversation, exactly like a web approval.
+ */
+async function handleCallback(deps: UpdateHandlerDeps, callback: TelegramCallbackQuery): Promise<void> {
+  const s = deps.services;
+  const telegram = s.telegram;
+  const chatId = callback.message?.chat.id;
+  try {
+    // Single-owner: presses from any other chat are ignored, like any other message.
+    if (chatId === undefined || chatId !== telegram.allowedChatId()) return;
+    const match = CALLBACK_ACTION.exec(callback.data);
+    if (!match) {
+      await telegram.answerCallbackQuery(callback.id, "Unknown action.");
+      return;
+    }
+    const decision = match[1]!;
+    const actionId = match[2]!;
+    const pending = s.pendingActions.view(actionId);
+    if (pending?.status !== "pending") {
+      await telegram.answerCallbackQuery(callback.id, "This request has expired or was already handled.");
+      if (callback.message) await telegram.clearReplyMarkup(chatId, callback.message.message_id);
+      return;
+    }
+    let outcome: string;
+    if (decision === "cancel") {
+      s.pendingActions.resolve(actionId, "cancelled");
+      outcome = `Cancelled: ${pending.summary}.`;
+    } else {
+      const action = await runApprovedAction([...ALL_TOOLS, ...s.mcp.chatTools()], { services: s, timezone: s.settings.get().timezone, mode: "chat" }, actionId);
+      outcome = action.status === "failed" ? `Failed: ${action.error ?? "the action could not be completed."}` : `Done: ${action.summary}.`;
+    }
+    await telegram.answerCallbackQuery(callback.id, decision === "cancel" ? "Cancelled" : "Done");
+    if (callback.message) await telegram.clearReplyMarkup(chatId, callback.message.message_id);
+    await telegram.sendMessage(chatId, outcome);
+  } catch (error) {
+    console.error("Telegram callback failed", error);
+    await telegram.answerCallbackQuery(callback.id, "Something went wrong.").catch(() => {});
+  }
+}
+
 /**
  * Handles one Telegram webhook update. Telegram already got its 200 by the time this runs, so
  * nothing here throws: failures are logged and, when the chat can be reached, answered with a
  * short apology instead.
  */
 export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    await handleCallback(deps, update.callback_query);
+    return;
+  }
   const text = update.message?.text?.trim();
   const chatId = update.message?.chat.id;
   if (!text || chatId === undefined) return;
@@ -242,6 +301,7 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
     if (conversationId) deps.activeRuns.set(conversationId, controller);
     let reply = "";
     let errorReply: string | null = null;
+    const approvals: PendingAction[] = [];
     try {
       for await (const event of (await deps.runner()).chat({ conversationId, message: text, signal: controller.signal })) {
         if (event.type === "start") {
@@ -251,10 +311,12 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
           if (event.conversation_id !== storedConversationId) telegram.rememberConversation(event.conversation_id);
         } else if (event.type === "text") {
           reply += event.delta;
+        } else if (event.type === "tool") {
+          if (event.tool.approval?.status === "pending") approvals.push(event.tool.approval);
         } else if (event.type === "error") {
           errorReply = event.message;
         }
-        // title, tool and done events don't contribute to the reply; done confirms persistence.
+        // title and done events don't contribute to the reply; done confirms persistence.
       }
     } finally {
       if (conversationId && deps.activeRuns.get(conversationId) === controller) deps.activeRuns.delete(conversationId);
@@ -263,8 +325,17 @@ export async function processUpdate(deps: UpdateHandlerDeps, update: TelegramUpd
     // A cancelled turn sends nothing: the owner already aborted it (e.g. from the web UI).
     if (controller.signal.aborted) return;
     // The reply is Markdown like the web chat; Telegram gets it as HTML (bold, code, links),
-    // split so tags never cross a message boundary, with a plain-text fallback.
-    if (reply.trim()) await telegram.sendMessage(chatId, reply.trim(), { html: true });
+    // split so tags never cross a message boundary, with a plain-text fallback. Proposed
+    // actions carry Approve / Cancel buttons right on the reply — no need to open the app.
+    const replyMarkup = approvals.length
+      ? {
+          inline_keyboard: approvals.map((a) => [
+            { text: "✅ Approve", callback_data: `approve:${a.id}` },
+            { text: "✖ Cancel", callback_data: `cancel:${a.id}` },
+          ]),
+        }
+      : undefined;
+    if (reply.trim()) await telegram.sendMessage(chatId, reply.trim(), { html: true, ...(replyMarkup ? { replyMarkup } : {}) });
     else await telegram.sendMessage(chatId, errorReply ?? AI_ERROR_REPLY);
   } catch (error) {
     console.error("Telegram update processing failed", error);
