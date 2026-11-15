@@ -156,4 +156,33 @@ describe("read_document tool and turn wiring", () => {
       expect(s.conversations.list({ limit: 1 })).toHaveLength(0);
     });
   });
+
+  it("a retry cannot carry document_ids and is refused before anything is stored", async () => {
+    await inAgent(async (agent) => {
+      const s = agent.services;
+      const doc = await s.documents.ingest({ name: "retry.txt", mime: "text/plain", bytes: new TextEncoder().encode("hello again") });
+      const provider: AIProvider = {
+        id: "workers-ai",
+        model: "m",
+        billable: false,
+        async generate() {
+          throw new Error("should not be called");
+        },
+        async *stream(): AsyncIterable<AgentEvent> {
+          yield* this.generateWithTools({} as ToolRequest);
+        },
+        // biome-ignore lint/correctness/useYield: the turn must fail before the provider is reached.
+        async *generateWithTools(): AsyncIterable<AgentEvent> {
+          throw new Error("should not be called");
+        },
+      };
+      const runner = new AgentRunner(s, provider);
+      await expect((async () => {
+        for await (const _ of runner.chat({ retry: true, conversationId: "no-such-conversation", message: "x", documentIds: [doc.id], signal: new AbortController().signal })) {
+          /* drain */
+        }
+      })()).rejects.toThrow("can't be re-attached");
+      expect(s.conversations.list({ limit: 1 })).toHaveLength(0);
+    });
+  });
 });

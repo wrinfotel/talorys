@@ -10,7 +10,7 @@ export const documentTools = [
     description:
       "Read the text of a document attached to the owner's latest message (PDF or plain text, already extracted). Returns up to 20,000 characters from 'offset'; call again with the returned offset to continue.",
     permission: "read",
-    maxCallsPerTurn: 8,
+    maxCallsPerTurn: 10,
     input: z.object({
       document_id: z.string().min(1),
       offset: z.number().int().min(0).max(1_000_000).optional(),

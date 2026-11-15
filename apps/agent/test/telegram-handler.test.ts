@@ -508,13 +508,17 @@ describe("telegram approval buttons", () => {
     });
   });
 
-  it("ignores button presses from any other chat and unknown payloads", async () => {
+  it("acknowledges but ignores button presses from any other chat and unknown payloads", async () => {
     await inAgent(async (agent) => {
       const api = await connected(agent);
       agent.services.telegram.setPaired(CHAT);
       await processUpdate(agentDeps(agent), callbackUpdate("approve:act-x", 999));
       await processUpdate(agentDeps(agent), callbackUpdate("make-me-a-sandwich"));
-      expect(callsOf(api, "answerCallbackQuery")).toHaveLength(1); // only the unknown-payload answer for the owner
+      // Both presses are answered, so the pressing client's spinner stops; only the owner gets a toast.
+      const acks = callsOf(api, "answerCallbackQuery");
+      expect(acks).toHaveLength(2);
+      expect(acks[0]!.body).toEqual({ callback_query_id: "cb-1" }); // foreign chat: acknowledged silently
+      expect(acks[1]!.body).toMatchObject({ callback_query_id: "cb-1", text: "Unknown action." });
       expect(callsOf(api, "sendMessage")).toHaveLength(0);
     });
   });

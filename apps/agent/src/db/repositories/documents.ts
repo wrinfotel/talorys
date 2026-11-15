@@ -45,8 +45,4 @@ export class DocumentRepository {
   get(id: string): StoredDocument | null {
     return this.db.one<StoredDocument>(`SELECT * FROM tal_documents WHERE id = ?`, id) ?? null;
   }
-
-  delete(id: string): void {
-    this.db.run(`DELETE FROM tal_documents WHERE id = ?`, id);
-  }
 }

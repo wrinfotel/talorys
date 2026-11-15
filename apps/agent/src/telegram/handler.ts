@@ -174,8 +174,12 @@ async function handleCallback(deps: UpdateHandlerDeps, callback: TelegramCallbac
   const telegram = s.telegram;
   const chatId = callback.message?.chat.id;
   try {
-    // Single-owner: presses from any other chat are ignored, like any other message.
-    if (chatId === undefined || chatId !== telegram.allowedChatId()) return;
+    // Single-owner: presses from any other chat (or a message too old to carry buttons)
+    // are acknowledged but otherwise ignored, like any other message.
+    if (chatId === undefined || chatId !== telegram.allowedChatId()) {
+      await telegram.answerCallbackQuery(callback.id).catch(() => {});
+      return;
+    }
     const match = CALLBACK_ACTION.exec(callback.data);
     if (!match) {
       await telegram.answerCallbackQuery(callback.id, "Unknown action.");

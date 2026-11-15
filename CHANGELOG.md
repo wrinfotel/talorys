@@ -2,6 +2,15 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
+## Unreleased
+
+### Fixed
+
+- A full-size document is now readable in one turn: `read_document` allows 10 calls (8 × 20,000 characters stopped 40,000 characters short of the cap).
+- `document_ids` sent together with `retry` is now rejected with a clear error instead of being validated and then silently dropped.
+- The web composer sends an attached document without typed text (with a default question), matching the Telegram path.
+- Telegram acknowledges button presses it ignores (from another chat or on messages too old to carry buttons), so the client spinner no longer hangs.
+
 ## 0.1.10 — 2026-11-14
 
 ### Added

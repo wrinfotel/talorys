@@ -195,6 +195,11 @@ export class AgentRunner {
     const settings = s.settings.get();
     const { limits } = settings;
 
+    // A retry answers the last owner message again; its documents are already noted in that
+    // message, so re-attaching would be validated and then silently ignored. Refuse instead.
+    if (input.retry && input.documentIds?.length)
+      throw new AppError("CONFLICT", "Documents can't be re-attached to a retry — send a new message and attach them again.");
+
     // Resolve attachments before anything is stored, so an expired document fails the
     // turn without leaving an empty conversation behind.
     const attached = (input.documentIds ?? []).map((documentId) => {

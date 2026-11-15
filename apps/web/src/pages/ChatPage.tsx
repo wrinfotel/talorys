@@ -56,6 +56,8 @@ const SUGGESTIONS = [
 /** Documents attach to a turn: at most 3, at most 12 MB each (the server extracts the text). */
 const MAX_DOCUMENT_BYTES = 12 * 1024 * 1024;
 const DOCUMENT_ACCEPT = ".pdf,.txt,.md,.csv,.json,.log,.xml,.yaml,.yml,.html,.htm,text/*,application/pdf";
+/** Stands in when a document is sent without typed text; the same default the Telegram handler uses. */
+const DOCUMENT_ONLY_MESSAGE = "Please read the attached document and summarize what it contains.";
 
 interface PendingDocument {
   id: string;
@@ -163,12 +165,15 @@ export function ChatPage() {
         old ? { ...old, messages: old.messages.filter((m) => !(m.role === "assistant" && m.status !== "complete" && m === old.messages.at(-1))) } : old,
       );
     }
-    setStream({ conversationId: convId, userText: opts.retry ? "" : text, userMessageId: null, assistantId: null, text: "", tools: [], error: null, done: false, canRetry: saved });
+    // Attachments can go without typed text: the default question stands in, like the Telegram path.
+    const documentOnly = !opts.retry && !text.trim() && !!opts.documentIds?.length;
+    const message = opts.retry ? "retry" : documentOnly ? DOCUMENT_ONLY_MESSAGE : text;
+    setStream({ conversationId: convId, userText: opts.retry ? "" : message, userMessageId: null, assistantId: null, text: "", tools: [], error: null, done: false, canRetry: saved });
     try {
       await streamChat(
         {
           conversation_id: convId ?? undefined,
-          message: opts.retry ? "retry" : text,
+          message,
           retry: opts.retry,
           document_ids: opts.documentIds?.length ? opts.documentIds : undefined,
         },
@@ -747,7 +752,8 @@ function Composer({
 
   function submit() {
     const text = value.trim();
-    if (!text || streaming) return;
+    // An attached document can be sent alone; ChatPage substitutes the default question for the empty text.
+    if ((!text && documents.length === 0) || streaming) return;
     onSend(text);
     setValue("");
   }
@@ -819,7 +825,7 @@ function Composer({
               <Square className="h-3.5 w-3.5 fill-current" />
             </Button>
           ) : (
-            <Button size="icon" onClick={submit} disabled={!value.trim()} aria-label="Send message" className="rounded-xl">
+            <Button size="icon" onClick={submit} disabled={!value.trim() && documents.length === 0} aria-label="Send message" className="rounded-xl">
               <ArrowUp className="h-4 w-4" />
             </Button>
           )}
