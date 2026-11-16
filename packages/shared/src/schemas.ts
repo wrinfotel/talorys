@@ -126,6 +126,8 @@ export interface ToolActivity {
   label: string;
   status: "running" | "success" | "error";
   error?: string;
+  /** Short result summary shown next to the label in the UI, e.g. "via exa" for a web search. */
+  detail?: string;
   /** Set when a destructive tool call is waiting for (or got) the owner's approval. */
   approval?: PendingAction;
   /** Set when the agent proposed a task plan; tasks exist only after the owner confirms it. */
@@ -139,6 +141,7 @@ export const toolActivitySchema = z.object({
   label: z.string(),
   status: z.enum(["running", "success", "error"]),
   error: z.string().optional(),
+  detail: z.string().optional(),
   approval: z
     .object({
       id: z.string(),

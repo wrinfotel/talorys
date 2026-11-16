@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { AgentRunner } from "../src/agent/runner";
+import type { AgentEvent, AIProvider } from "../src/ai/provider";
 import { ALL_TOOLS } from "../src/tools";
 import { http, webTools } from "../src/tools/web";
 import type { ImmediateTool, ToolContext } from "../src/tools/registry";
+import { inAgent } from "./helpers";
 
 const ctx = {
   services: { webSearch: { tavilyKey: async () => null, keenableKey: async () => null } },
@@ -253,5 +256,41 @@ describe("web_search", () => {
     const result = (await run(webSearch, { query: "test query" })) as { results: { title: string; url: string }[] };
     expect(result.results[0]).toEqual({ title: "First result", url: "https://example.com/one", snippet: "The & first snippet" });
     expect(result.results[1]!.url).toBe("https://direct.example.com/two");
+  });
+});
+
+const USAGE = { model: "m", billable: false, inputTokens: { reported: 1, estimated: 0 }, outputTokens: { reported: 1, estimated: 0 }, cachedInputTokens: 0 };
+
+/** A provider whose turn calls web_search (with a fabricated result) and then answers. */
+class SearchToolProvider implements AIProvider {
+  readonly id = "stub";
+  readonly model = "stub-model";
+  readonly billable = false;
+  async generate(): Promise<{ text: string; usage: typeof USAGE }> {
+    return { text: "ok", usage: USAGE };
+  }
+  async *stream(): AsyncIterable<AgentEvent> {
+    yield* this.generateWithTools();
+  }
+  async *generateWithTools(): AsyncIterable<AgentEvent> {
+    yield { type: "tool-start", id: "t1", name: "web_search", input: { query: "news" } };
+    yield { type: "tool-end", id: "t1", name: "web_search", output: { provider: "exa", query: "news", results: [{ title: "T", url: "https://example.com/a", snippet: "s" }] } };
+    yield { type: "usage", usage: USAGE };
+    yield { type: "text", delta: "ok" };
+  }
+}
+
+describe("tool detail for the UI", () => {
+  it("attaches the search provider summary to the tool activity", async () => {
+    await inAgent(async (agent) => {
+      const runner = new AgentRunner(agent.services, new SearchToolProvider());
+      const events: { type: string; [k: string]: unknown }[] = [];
+      for await (const e of runner.chat({ message: "what is new?", signal: new AbortController().signal })) events.push(e as { type: string });
+      // The turn emits the tool twice (start, then end); the last one carries the outcome.
+      const tool = events.filter((e) => e.type === "tool").at(-1) as unknown as { tool: { name: string; status: string; detail?: string } };
+      expect(tool.tool.name).toBe("web_search");
+      expect(tool.tool.status).toBe("success");
+      expect(tool.tool.detail).toBe("via exa");
+    });
   });
 });

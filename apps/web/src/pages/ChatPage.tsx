@@ -622,7 +622,7 @@ function UserBubble({ text }: { text: string }) {
 function ToolChip({ tool }: { tool: ToolActivity }) {
   return (
     <span
-      title={tool.error}
+      title={tool.error ?? tool.detail}
       className={cn(
         "inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
         tool.status === "error" ? "border-danger/30 bg-danger-soft text-danger" : "border-border bg-subtle text-fg-muted",
@@ -636,6 +636,7 @@ function ToolChip({ tool }: { tool: ToolActivity }) {
         <XCircle className="h-3 w-3 shrink-0" />
       )}
       <span className="truncate">{tool.label}</span>
+      {tool.detail && <span className="shrink-0 text-fg-subtle">· {tool.detail}</span>}
     </span>
   );
 }

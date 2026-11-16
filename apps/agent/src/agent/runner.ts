@@ -393,6 +393,8 @@ export class AgentRunner {
               if (activity) {
                 activity.status = event.error ? "error" : "success";
                 if (event.error) activity.error = event.error.slice(0, 300);
+                const summary = turnTools.find(event.name)?.summarize?.(event.output);
+                if (summary) activity.detail = summary.slice(0, 120);
                 const approval = turnTools.approvalFor(event.id);
                 if (approval) activity.approval = approval;
                 const planId = turnTools.planFor(event.id);

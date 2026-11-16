@@ -362,6 +362,10 @@ const webSearchTool = defineTool({
   maxCallsPerTurn: 2,
   input: z.object({ query: z.string().min(1).max(400) }),
   label: (i) => `Web search “${i.query.trim().slice(0, 60)}”`,
+  summarize: (result) => {
+    if (typeof result !== "object" || result === null || !("provider" in result) || typeof result.provider !== "string") return "";
+    return `via ${result.provider}`;
+  },
   execute: async (i, ctx) => {
     // The search ring, in preference order: a provider the owner stored a key for (Tavily,
     // Keenable) leads, the keyless ring (Exa, Parallel — MCP; Firecrawl — anonymous REST)

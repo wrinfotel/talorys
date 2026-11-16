@@ -37,6 +37,8 @@ interface BaseTool<S extends z.ZodType> {
   maxCallsPerTurn?: number;
   /** Short human-readable label for the UI, e.g. "Adding task “Buy milk”". */
   label: (input: z.infer<S>) => string;
+  /** Short human-readable result summary for the UI chip, e.g. "via exa". Empty string shows nothing. */
+  summarize?: (result: unknown) => string;
   /** Set on tools from a remote MCP server. They are offered in chat only, never in scheduled runs. */
   external?: { serverId: string };
 }
