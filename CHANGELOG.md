@@ -2,6 +2,12 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
+## 0.1.13 — 2026-11-16
+
+### Added
+
+- **The search provider is visible in the chat.** A finished web search now shows which provider answered — "via exa", "via parallel", "via bing" — right on the tool chip, instead of being visible only to the model. Tools can carry a short result summary (`detail`); the search tool summarizes itself.
+
 ## 0.1.12 — 2026-11-16
 
 ### Added
