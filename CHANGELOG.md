@@ -2,6 +2,12 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
+## 0.1.14 — 2026-11-16
+
+### Fixed
+
+- **Replies no longer die silently at the token limit.** A model that runs out of output tokens mid-reply ends the message mid-word with no hint. The providers now surface the "length" finish reason, the reply is marked, the web chat explains the cut under the message, and scheduled-run notifications get the same note. The default output limit doubles to 2,048 tokens, which covers most search-backed digests; raise it further in Settings → AI if you use long-form models.
+
 ## 0.1.13 — 2026-11-16
 
 ### Added

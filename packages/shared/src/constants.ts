@@ -1,4 +1,4 @@
-export const TALORYS_VERSION = "0.1.13";
+export const TALORYS_VERSION = "0.1.14";
 
 /** Stable identity of the single owner's agent inside the private DO namespace. */
 export const AGENT_INSTANCE_NAME = "personal-agent";
@@ -25,7 +25,9 @@ export const LANGUAGES = ["en", "ko"] as const;
 export type Language = (typeof LANGUAGES)[number];
 
 export const DEFAULT_LIMITS = {
-  maxOutputTokens: 1024,
+  // Generous enough for search-backed digests: a cut-off reply ends mid-word, and reasoning
+  // models spend output tokens thinking before any content.
+  maxOutputTokens: 2048,
   maxToolCalls: 6,
   maxAgentIterations: 8,
   maxContextTokens: 6000,
