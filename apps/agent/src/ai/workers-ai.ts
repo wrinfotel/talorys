@@ -119,7 +119,9 @@ export class CloudflareWorkersAIProvider implements AIProvider {
             break;
           case "finish-step":
             // An "error" step still ran: its prompt was processed and any received counts are kept.
-            if (steps[stepIndex]) yield { type: "usage", usage: stepUsage(this.model, steps[stepIndex]!, stepOutputChars) };
+            if (steps[stepIndex]) {
+              yield { type: "usage", usage: stepUsage(this.model, steps[stepIndex]!, stepOutputChars), finishReason: part.finishReason };
+            }
             stepIndex++;
             stepOutputChars = 0;
             break;

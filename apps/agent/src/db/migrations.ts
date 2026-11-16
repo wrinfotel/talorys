@@ -414,6 +414,14 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    version: 14,
+    name: "truncated replies",
+    statements: [
+      // Set when a reply hit the output-token limit, so the UI can say so after a reload.
+      `ALTER TABLE tal_messages ADD COLUMN truncated INTEGER NOT NULL DEFAULT 0`,
+    ],
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

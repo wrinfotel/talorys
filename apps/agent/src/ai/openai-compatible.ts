@@ -144,7 +144,7 @@ export class OpenAICompatibleProvider implements AIProvider {
             };
             break;
           case "finish-step":
-            yield { type: "usage", usage: this.usage(part.usage, inputChars, stepOutputChars) };
+            yield { type: "usage", usage: this.usage(part.usage, inputChars, stepOutputChars), finishReason: part.finishReason };
             reported++;
             stepOutputChars = 0;
             break;

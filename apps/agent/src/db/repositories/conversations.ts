@@ -10,6 +10,7 @@ interface MessageRow {
   tools: string;
   status: ChatMessage["status"];
   error: string | null;
+  truncated: number;
   created_at: string;
   source: "chat" | "import";
 }
@@ -37,7 +38,8 @@ export function decodeTools(raw: unknown): ToolActivity[] {
 }
 
 function toMessage(row: MessageRow): ChatMessage {
-  return { ...row, tools: decodeTools(row.tools) };
+  const { truncated, ...rest } = row;
+  return { ...rest, tools: decodeTools(row.tools), ...(truncated ? { truncated: true } : {}) };
 }
 
 export class ConversationRepository {
@@ -134,6 +136,7 @@ export class ConversationRepository {
     tools?: ToolActivity[];
     status?: ChatMessage["status"];
     error?: string | null;
+    truncated?: boolean;
     id?: string;
   }): ChatMessage {
     const message: ChatMessage = {
@@ -145,12 +148,13 @@ export class ConversationRepository {
       status: input.status ?? "complete",
       error: input.error ?? null,
       created_at: now(),
+      ...(input.truncated ? { truncated: true } : {}),
       source: "chat",
     };
     this.db.run(
-      `INSERT INTO tal_messages (id, conversation_id, role, content, tools, status, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tal_messages (id, conversation_id, role, content, tools, status, error, truncated, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       message.id, message.conversation_id, message.role, message.content, JSON.stringify(message.tools),
-      message.status, message.error, message.created_at,
+      message.status, message.error, input.truncated ? 1 : 0, message.created_at,
     );
     this.touch(input.conversation_id);
     return message;

@@ -124,6 +124,7 @@ describe("local model consumption", () => {
       db.run("DROP TABLE IF EXISTS tal_mcp_servers");
       db.run("DROP TABLE IF EXISTS tal_documents");
       db.run("ALTER TABLE tal_pending_actions DROP COLUMN result");
+      db.run("ALTER TABLE tal_messages DROP COLUMN truncated");
       db.run("UPDATE tal_schema SET version = 6 WHERE id = 1");
       migrate(db);
       migrate(db);

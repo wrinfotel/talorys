@@ -66,6 +66,23 @@ class EmptyProvider implements AIProvider {
   }
 }
 
+/** Streams a partial reply and reports the provider's own output-token cut. */
+class CutProvider implements AIProvider {
+  readonly id = "custom";
+  readonly model = "paid-model";
+  readonly billable = false;
+  async generate(): Promise<{ text: string; usage: typeof USAGE }> {
+    return { text: "partial reply", usage: USAGE };
+  }
+  async *stream(): AsyncIterable<AgentEvent> {
+    yield* this.generateWithTools();
+  }
+  async *generateWithTools(): AsyncIterable<AgentEvent> {
+    yield { type: "text", delta: "partial reply" };
+    yield { type: "usage", usage: USAGE, finishReason: "length" };
+  }
+}
+
 /** Streams tool activity and usage but never any prose: "did the work", wrote nothing. */
 class ToolsThenSilenceProvider implements AIProvider {
   readonly id = "custom";
@@ -148,6 +165,23 @@ describe("provider fallback", () => {
       });
     });
   });
+
+  it("marks a reply truncated when the provider reports a length cut", async () => {
+    await inAgent(async (agent) => {
+      const runner = new AgentRunner(agent.services, new CutProvider());
+      const events = await turn(runner);
+      expect(events.at(-1)).toMatchObject({ type: "done", message: { status: "complete", truncated: true } });
+    });
+  });
+
+  it("leaves the truncated flag off for a normal reply", async () => {
+    await inAgent(async (agent) => {
+      const runner = new AgentRunner(agent.services, new WorkingProvider());
+      const events = await turn(runner);
+      expect(events.at(-1)).toMatchObject({ type: "done", message: { status: "complete" } });
+      expect((events.at(-1) as unknown as { message: { truncated?: boolean } }).message.truncated).toBeUndefined();
+    });
+  });
 });
 
 describe("provider fallback for scheduled runs", () => {
@@ -193,6 +227,15 @@ describe("provider fallback for scheduled runs", () => {
       const runner = new AgentRunner(agent.services, new WorkingProvider(), undefined, [], new WorkingProvider());
       expect(await runner.runScheduledPrompt("digest")).toBe("ok");
       expect(agent.services.activity.list(5).some((a) => a.type === "ai.fallback")).toBe(false);
+    });
+  });
+
+  it("appends the cut note to a scheduled run that hit the token limit", async () => {
+    await inAgent(async (agent) => {
+      const runner = new AgentRunner(agent.services, new CutProvider());
+      const text = await runner.runScheduledPrompt("digest");
+      expect(text).toContain("partial reply");
+      expect(text).toContain("output-token limit");
     });
   });
 });

@@ -246,6 +246,8 @@ export class AgentRunner {
     let text = "";
     const tools: ToolActivity[] = [];
     let executor: ToolExecutor | null = null;
+    /** Set when the model ran out of output tokens mid-reply (finishReason "length"). */
+    let cutByLimit = false;
     const finish = (status: ChatMessage["status"], error: string | null): ChatMessage => {
       // A plan proposed in a turn the owner stopped is withdrawn, so a half-finished reply can't leave one to confirm.
       if (status === "cancelled" && executor) {
@@ -260,6 +262,7 @@ export class AgentRunner {
         tools,
         status,
         error,
+        ...(status === "complete" && cutByLimit ? { truncated: true } : {}),
       });
     };
 
@@ -404,6 +407,7 @@ export class AgentRunner {
               }
             } else if (event.type === "usage") {
               s.usage.record(event.usage);
+              cutByLimit = event.finishReason === "length";
             }
           }
         } catch (error) {
@@ -484,6 +488,8 @@ export class AgentRunner {
     // Whether the per-round budget ran out mid-run: without this flag the run would end
     // "(No output)", indistinguishable from a model that never wrote prose.
     let budgetStarved = false;
+    /** The model ran out of output tokens mid-reply (finishReason "length"). */
+    let cutByLimit = false;
     let toolCalls = 0;
     for (let attempt = 0; ; attempt++) {
       // A fresh executor per attempt: the per-run tool budget and duplicate-call detection
@@ -515,6 +521,7 @@ export class AgentRunner {
           if (event.type === "text") text += event.delta;
           if (event.type === "usage") {
             s.usage.record(event.usage);
+            cutByLimit = event.finishReason === "length";
           }
         }
       } catch (error) {
@@ -548,10 +555,10 @@ export class AgentRunner {
       activeProvider = fallback;
     }
     s.usage.increment({ tool_calls: toolCalls });
-    return (
-      stripToolMarkup(text).trim() ||
-      (budgetStarved ? "Stopped mid-run: the daily AI budget ran out. Adjust it in Settings → AI." : "(No output)")
-    );
+    const reply = stripToolMarkup(text).trim();
+    if (!reply) return budgetStarved ? "Stopped mid-run: the daily AI budget ran out. Adjust it in Settings → AI." : "(No output)";
+    // A cut-off digest would silently end mid-sentence in the owner's notification; say why.
+    return cutByLimit ? `${reply}\n\n(The reply was cut by the output-token limit — raise it in Settings → AI.)` : reply;
   }
 }
 

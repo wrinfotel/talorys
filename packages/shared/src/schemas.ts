@@ -166,6 +166,8 @@ export interface ChatMessage {
   status: "complete" | "error" | "cancelled";
   error: string | null;
   created_at: string;
+  /** Set when the model ran out of output tokens mid-reply, so the UI can explain the cut. */
+  truncated?: boolean;
   /** "import" for messages restored from a backup; they never count as live owner input. */
   source?: "chat" | "import";
 }

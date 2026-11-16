@@ -54,7 +54,8 @@ export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "tool-start"; id: string; name: string; input: unknown }
   | { type: "tool-end"; id: string; name: string; output: unknown; error?: string }
-  | { type: "usage"; usage: Usage };
+  /** `finishReason` ("length" = the output-token cap was hit) rides on the step's usage event. */
+  | { type: "usage"; usage: Usage; finishReason?: string };
 
 /**
  * Provider abstraction. Workers AI is the only production provider in the MVP;

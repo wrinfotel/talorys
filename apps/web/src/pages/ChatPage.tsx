@@ -605,6 +605,7 @@ function MessageView({ message, onRetry }: { message: ChatMessage; onRetry?: () 
       tools={message.tools}
       error={message.status === "error" ? message.error : null}
       cancelled={message.status === "cancelled"}
+      truncated={message.truncated}
       streaming={false}
       onRetry={onRetry}
     />
@@ -647,6 +648,7 @@ function AssistantBubble({
   error,
   streaming,
   cancelled,
+  truncated,
   onRetry,
 }: {
   text: string;
@@ -654,6 +656,7 @@ function AssistantBubble({
   error: string | null;
   streaming: boolean;
   cancelled?: boolean;
+  truncated?: boolean;
   onRetry?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
@@ -680,6 +683,11 @@ function AssistantBubble({
           </div>
         ) : null}
         {cancelled && <p className="text-xs text-fg-subtle">Stopped.</p>}
+        {!streaming && truncated && !cancelled && !error && (
+          <p className="text-xs text-fg-subtle">
+            The reply was cut by the output-token limit — raise it in Settings → AI.
+          </p>
+        )}
         {error && (
           <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-danger/25 bg-danger-soft px-3 py-2 text-sm text-danger">
             <AlertTriangle className="h-4 w-4 shrink-0" />
