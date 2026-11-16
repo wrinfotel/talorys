@@ -14,9 +14,10 @@ account** — plus three additions built on top:
   automation results in the same chat. Pair it with a one-time code; other chats are
   ignored. See [docs/telegram-bot.md](docs/telegram-bot.md).
 - **🌐 Web access** — the agent reads public web pages (`web_fetch`) and searches the
-  web (`web_search`), in chat and in Telegram. Read-only, no logins; search quality
-  upgrades with a free [Tavily](https://app.tavily.com) key (**Settings → Integrations**),
-  with an automatic built-in fallback.
+  web (`web_search`), in chat and in Telegram. Read-only, no logins. Search runs on a
+  keyless ring of free agent-grade services (Exa → Parallel → Firecrawl → Bing) with no
+  setup; a free [Tavily](https://app.tavily.com) or [Keenable](https://app.keenable.ai)
+  key (**Settings → Integrations**) moves that provider to the front.
 
 > 🆕 **New here?** A step-by-step setup guide for non-technical users — installation, your
 > own model (OpenRouter), the Telegram bot and better web search:
@@ -168,9 +169,10 @@ MCP server unless you connected it and turned the tool on. See
 [docs/mcp.md](docs/mcp.md#privacy).
 
 The built-in web tools (`web_fetch`, `web_search`) talk to the public web by
-design: a search sends only the search query to the search engine (Tavily if you
-configured a key, otherwise Bing), and a page read fetches exactly the URL the
-assistant chose. Memories, notes and conversation content are never attached to
+design: a search sends only the search query to the first working provider in
+the search ring (a keyed Tavily or Keenable, then the keyless Exa, Parallel,
+Firecrawl, Bing), and a page read fetches exactly the URL the assistant chose.
+Memories, notes and conversation content are never attached to
 these calls.
 
 Security model and threat mitigations: [docs/security.md](docs/security.md).

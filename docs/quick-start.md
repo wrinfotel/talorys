@@ -14,7 +14,7 @@ You don't need to buy or rent a server. Everything runs on Cloudflare's free tie
 - It **remembers** facts about you, manages **tasks, notes and projects**, and runs **reminders** and **routines** on a schedule.
 - Talk to it **in the browser** or **in Telegram** — wherever you happen to be.
 - By default it runs on Cloudflare's free model, but you can connect **your own model** (OpenRouter, OpenAI, and more) — it gets noticeably smarter.
-- It can **read web pages** and **search the web** (optionally through Tavily, which makes search better).
+- It can **read web pages** and **search the web** — search works with no setup through a ring of free search services, and free API keys can upgrade it further.
 
 ---
 
@@ -144,16 +144,19 @@ reminders and routine results will arrive in your chat.
 
 ---
 
-## Step 4 (optional). Better web search with Tavily
+## Step 4 (optional). Even better search with a free API key
 
-The assistant can already read pages (`web_fetch`) and search the web (`web_search` —
-a built-in option that needs no account). For smarter search:
+Search already works with no setup: the assistant asks a ring of free, keyless search
+services built for agents (Exa → Parallel → Firecrawl), and Bing's results back them
+up if they are all busy. If you want a specific service to answer first, add one of
+these free keys in **Settings → Integrations → Web search**:
 
-1. Sign up at [app.tavily.com](https://app.tavily.com) (free tier: 1,000 searches a month).
-2. Copy your API key (starts with `tvly-…`).
-3. In your Talorys: **Settings → Integrations → Web search** → paste the key → **Save**.
-4. The badge changes to **Tavily**. If Tavily is ever unavailable or the key stops
-   working, the assistant quietly falls back to the built-in search — nothing breaks.
+1. **Tavily** — [app.tavily.com](https://app.tavily.com), 1,000 searches a month free (the key starts with `tvly-…`).
+2. **Keenable** — [app.keenable.ai](https://app.keenable.ai), 100,000 searches a month free.
+
+Paste the key and press **Save** — that service now answers first, and the rest of the
+ring stays as backup. If it is ever unavailable or the key stops working, the next
+service takes over automatically — nothing breaks.
 
 ---
 
@@ -238,12 +241,12 @@ reset at 00:00 UTC). You can see the spend under **Settings → AI**. Either wai
 the next day or connect your own model (Step 2) — e.g. a free or cheap one via
 OpenRouter.
 
-**What does it cost?** Cloudflare's free tier covers personal use. OpenRouter and Tavily
-have free quotas; paid models only if you top up your own balance.
+**What does it cost?** Cloudflare's free tier covers personal use. OpenRouter, Tavily
+and Keenable have free quotas; paid models only if you top up your own balance.
 
-**Could someone get my keys?** All keys (model, Telegram, Tavily) are stored encrypted
+**Could someone get my keys?** All keys (model, Telegram, Tavily, Keenable) are stored encrypted
 inside your assistant and are never shown in the interface again. If a key ever leaks,
-revoke it at the service (OpenRouter / BotFather / Tavily) and paste a new one in the
+revoke it at the service (OpenRouter / BotFather / Tavily / Keenable) and paste a new one in the
 same settings.
 
 ---

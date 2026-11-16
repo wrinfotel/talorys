@@ -152,7 +152,8 @@ async function statusReply(deps: UpdateHandlerDeps): Promise<string> {
   } else if (custom) {
     model += ` — your custom provider (${custom.model}) stays saved but is paused`;
   }
-  const search = (await deps.services.webSearch.apiKey()) ? "Tavily" : "built-in (no API key)";
+  const [tavily, keenable] = await Promise.all([deps.services.webSearch.tavilyKey(), deps.services.webSearch.keenableKey()]);
+  const search = tavily ? "Tavily first, then the free ring" : keenable ? "Keenable first, then the free ring" : "free ring: Exa → Parallel → Firecrawl → Bing (no keys needed)";
   const notifications = (await deps.services.telegram.status()).notify_enabled === true ? "on" : "off";
   return [
     "Here's how I'm set up:",

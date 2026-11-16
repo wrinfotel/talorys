@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TALORYS_VERSION } from "@talorys/shared";
 import { defineTool, ToolError, type ToolContext } from "./registry";
 
 /** Injectable for tests; production uses the Workers global fetch. */
@@ -164,6 +165,145 @@ async function tavilySearch(query: string, apiKey: string, ctx: ToolContext): Pr
     .filter((r) => /^https?:\/\//.test(r.url) && r.title);
 }
 
+/** Keenable (with the owner's free key: 100,000 requests a month) ranks pages on its own index. */
+async function keenableSearch(query: string, apiKey: string, ctx: ToolContext): Promise<WebResult[]> {
+  const res = await http.fetch("https://api.keenable.ai/v1/search", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-keenable-title": "Talorys", authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ query, max_results: MAX_SEARCH_RESULTS }),
+    signal: requestSignal(ctx),
+  });
+  if (!res.ok) {
+    const detail = (await res.text()).toLowerCase();
+    throw new ToolError(
+      `Keenable failed (HTTP ${res.status})${detail.includes("unauthorized") || detail.includes("authentication") ? " — the API key was rejected; update it in Settings → Integrations" : ""}.`,
+    );
+  }
+  const json = (await res.json()) as { results?: { title?: string; url?: string; description?: string; snippet?: string }[] };
+  return (json.results ?? [])
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map((r) => ({ title: (r.title ?? "").trim(), url: (r.url ?? "").trim(), snippet: (r.snippet || r.description || "").trim().slice(0, 300) }))
+    .filter((r) => /^https?:\/\//.test(r.url) && r.title);
+}
+
+/** Firecrawl's anonymous cloud tier: no key, undocumented limits — a reserve, never the primary. */
+async function firecrawlSearch(query: string, ctx: ToolContext): Promise<WebResult[]> {
+  const res = await http.fetch("https://api.firecrawl.dev/v2/search", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query, limit: MAX_SEARCH_RESULTS }),
+    signal: requestSignal(ctx),
+  });
+  if (!res.ok) throw new ToolError(`Firecrawl failed (HTTP ${res.status}).`);
+  const json = (await res.json()) as { data?: { web?: { url?: string; title?: string; description?: string }[] } };
+  return (json.data?.web ?? [])
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map((r) => ({ title: (r.title ?? "").trim(), url: (r.url ?? "").trim(), snippet: (r.description ?? "").trim().slice(0, 300) }))
+    .filter((r) => /^https?:\/\//.test(r.url) && r.title);
+}
+
+/** One JSON-RPC message to a Streamable-HTTP MCP server; replies may be SSE-framed, so `data:` lines are parsed. */
+async function mcpRpc(
+  endpoint: string,
+  session: string | null,
+  message: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<{ status: number; sessionId: string | null; replies: { id?: number; result?: { content?: { type: string; text?: string }[]; isError?: boolean }; error?: { message?: string } }[] }> {
+  const res = await http.fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...(session ? { "mcp-session-id": session } : {}),
+    },
+    body: JSON.stringify(message),
+    signal: requestSignal(ctx),
+  });
+  const sessionId = res.headers.get("mcp-session-id");
+  const body = await res.text();
+  if (!res.ok) throw new ToolError(`HTTP ${res.status}${body ? `: ${body.slice(0, 200)}` : ""}.`);
+  const replies: { id?: number; result?: { content?: { type: string; text?: string }[]; isError?: boolean }; error?: { message?: string } }[] = [];
+  if (/^data:/m.test(body)) {
+    for (const line of body.split("\n")) {
+      const payload = line.startsWith("data:") ? line.slice(5).trim() : "";
+      if (payload) replies.push(JSON.parse(payload));
+    }
+  } else if (body.trim()) {
+    replies.push(JSON.parse(body));
+  }
+  return { status: res.status, sessionId, replies };
+}
+
+/**
+ * Minimal MCP client for the built-in keyless search servers: open a session, then call one
+ * tool and return its text content. A fresh session per search keeps this stateless — the
+ * handshake costs one extra round trip, far below the request's own budget.
+ */
+async function mcpSearchText(endpoint: string, tool: string, args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
+  const open = await mcpRpc(endpoint, null, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "talorys", version: TALORYS_VERSION } },
+  }, ctx);
+  const session = open.sessionId;
+  if (!session) throw new ToolError("The search server did not open a session.");
+  // The spec's post-initialize notification; servers refuse tool calls before it.
+  await mcpRpc(endpoint, session, { jsonrpc: "2.0", method: "notifications/initialized" }, ctx);
+  const call = await mcpRpc(endpoint, session, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: tool, arguments: args } }, ctx);
+  const reply = call.replies.find((m) => m.id === 2);
+  const errorMessage = reply?.error?.message;
+  if (errorMessage) throw new ToolError(`${errorMessage.slice(0, 200)}.`);
+  const text = reply?.result?.content?.find((c) => c.type === "text")?.text;
+  if (reply?.result?.isError || text === undefined) throw new ToolError("The search server returned no usable answer.");
+  return text;
+}
+
+/**
+ * Exa's MCP tool replies in text blocks ("Title: …\nURL: …\nPublished: …\nAuthor: …\nHighlights: …"),
+ * not JSON. `Published` and `Author` lines come and go — only Title and URL are relied on.
+ */
+function parseExaText(text: string): WebResult[] {
+  const results: WebResult[] = [];
+  for (const block of text.split(/\n\n(?=Title: )/)) {
+    const title = /^Title: (.+)$/m.exec(block)?.[1]?.trim();
+    const url = /^URL: (\S+)\s*$/m.exec(block)?.[1]?.trim();
+    if (!title || !url || !/^https?:\/\//.test(url)) continue;
+    const highlights = (/(?:^|\n)Highlights:\n?([\s\S]*)$/.exec(block)?.[1] ?? "").trim();
+    results.push({ title, url, snippet: highlights.replace(/\s+\n/g, "\n").slice(0, 300) });
+    if (results.length >= MAX_SEARCH_RESULTS) break;
+  }
+  return results;
+}
+
+/** Parallel's MCP tool wraps a JSON document in its text content. */
+function parseParallelText(text: string): WebResult[] {
+  let parsed: { results?: { url?: string; title?: string; excerpts?: string[] }[] };
+  try {
+    parsed = JSON.parse(text) as typeof parsed;
+  } catch {
+    return [];
+  }
+  return (parsed.results ?? [])
+    .slice(0, MAX_SEARCH_RESULTS)
+    .map((r) => ({ title: (r.title ?? "").trim(), url: (r.url ?? "").trim(), snippet: (r.excerpts ?? []).join("\n").trim().slice(0, 300) }))
+    .filter((r) => /^https?:\/\//.test(r.url) && r.title);
+}
+
+async function exaSearch(query: string, ctx: ToolContext): Promise<WebResult[]> {
+  const text = await mcpSearchText("https://mcp.exa.ai/mcp", "web_search_exa", { query, numResults: MAX_SEARCH_RESULTS }, ctx);
+  return parseExaText(text);
+}
+
+/** Parallel refuses a search without both arguments: the objective frames it, the queries drive it. */
+async function parallelSearch(query: string, ctx: ToolContext): Promise<WebResult[]> {
+  const text = await mcpSearchText("https://search.parallel.ai/mcp", "web_search", {
+    objective: `Find authoritative sources answering: ${query}`,
+    search_queries: [query],
+  }, ctx);
+  return parseParallelText(text);
+}
+
 /** The built-in fallback: Bing's plain HTML results (Workers egress can't reach DuckDuckGo — it sits behind Cloudflare). */
 async function bingSearch(query: string, ctx: ToolContext): Promise<WebResult[]> {
   const res = await http.fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&count=10`, {
@@ -223,26 +363,44 @@ const webSearchTool = defineTool({
   input: z.object({ query: z.string().min(1).max(400) }),
   label: (i) => `Web search “${i.query.trim().slice(0, 60)}”`,
   execute: async (i, ctx) => {
-    // Tavily when the owner configured a key; every Tavily failure falls back to the built-in
-    // Bing results, so the owner still gets an answer instead of a dead end.
-    const apiKey = await ctx.services.webSearch.apiKey();
-    if (apiKey) {
+    // The search ring, in preference order: a provider the owner stored a key for (Tavily,
+    // Keenable) leads, the keyless ring (Exa, Parallel — MCP; Firecrawl — anonymous REST)
+    // follows, and Bing's plain-HTML results are the always-available last resort. Any
+    // provider failure — rate limit, rejected key, 5xx, garbage answer — hands the query to
+    // the next one; the first that answers wins and the failures ride along as a note.
+    const tavily = await ctx.services.webSearch.tavilyKey();
+    const keenable = await ctx.services.webSearch.keenableKey();
+    const ring: { name: string; run: () => Promise<WebResult[]> }[] = [
+      ...(tavily ? [{ name: "tavily", run: () => tavilySearch(i.query, tavily, ctx) }] : []),
+      ...(keenable ? [{ name: "keenable", run: () => keenableSearch(i.query, keenable, ctx) }] : []),
+      { name: "exa", run: () => exaSearch(i.query, ctx) },
+      { name: "parallel", run: () => parallelSearch(i.query, ctx) },
+      { name: "firecrawl", run: () => firecrawlSearch(i.query, ctx) },
+    ];
+    const failed: string[] = [];
+    for (const attempt of ring) {
       try {
-        const results = await tavilySearch(i.query, apiKey, ctx);
-        return { provider: "tavily" as const, query: i.query, results, ...(results.length === 0 ? { note: NO_RESULTS_NOTE } : {}) };
+        const results = await attempt.run();
+        const note = [
+          ...(failed.length ? [`After ${failed.join("; ")} — answered by ${attempt.name}.`] : []),
+          ...(results.length === 0 ? [NO_RESULTS_NOTE] : []),
+        ]
+          .join(" ")
+          .trim();
+        return { provider: attempt.name, query: i.query, results, ...(note ? { note } : {}) };
       } catch (error) {
         if (ctx.signal?.aborted) throw error;
-        const results = await bingSearch(i.query, ctx);
-        return {
-          provider: "bing" as const,
-          query: i.query,
-          results,
-          note: `Tavily failed (${error instanceof Error ? error.message : "error"}); used the built-in fallback search.`,
-        };
+        failed.push(`${attempt.name} failed (${error instanceof Error ? error.message : "error"})`);
       }
     }
     const results = await bingSearch(i.query, ctx);
-    return { provider: "bing" as const, query: i.query, results, ...(results.length === 0 ? { note: NO_RESULTS_NOTE } : {}) };
+    const note = [
+      ...(failed.length ? [`After ${failed.join("; ")} — used the built-in fallback search.`] : []),
+      ...(results.length === 0 ? [NO_RESULTS_NOTE] : []),
+    ]
+      .join(" ")
+      .trim();
+    return { provider: "bing" as const, query: i.query, results, ...(note ? { note } : {}) };
   },
 });
 

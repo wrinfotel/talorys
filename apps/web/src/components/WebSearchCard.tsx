@@ -8,27 +8,58 @@ import { api } from "../lib/api";
 
 const KEY = ["web-search"] as const;
 
-/** Settings card for the web_search backend: an optional Tavily key over the built-in Bing results. */
+const STATUS_TEXT: Record<WebSearchStatus["provider"], string> = {
+  tavily: "Tavily first (agent-grade results, free tier 1,000 searches/month), then the free ring: Exa → Parallel → Firecrawl → Bing.",
+  keenable: "Keenable first (100,000 searches/month with the free key), then the free ring: Exa → Parallel → Firecrawl → Bing.",
+  keyless: "Free keyless ring: Exa → Parallel → Firecrawl → Bing. Add an API key below to put that provider first.",
+};
+
+/** Settings card for the web_search providers: optional Tavily and Keenable keys over the keyless ring. */
 export function WebSearchCard() {
   const status = useQuery({ queryKey: KEY, queryFn: () => api<WebSearchStatus>("/web-search") });
   const s = status.data;
   const qc = useQueryClient();
-  const [key, setKey] = useState("");
+  const [tavilyKey, setTavilyKey] = useState("");
+  const [keenableKey, setKeenableKey] = useState("");
 
   const save = useApiMutation(
-    (apiKey: string) => api<WebSearchStatus>("/web-search", { method: "PUT", body: { api_key: apiKey } }),
+    (input: { provider: "tavily" | "keenable"; api_key: string }) => api<WebSearchStatus>("/web-search", { method: "PUT", body: input }),
     {
-      success: "Tavily key saved — web search now uses Tavily",
+      success: "API key saved — web search updated",
       onSuccess: (r) => {
         qc.setQueryData(KEY, r);
-        setKey("");
+        setTavilyKey("");
+        setKeenableKey("");
       },
     },
   );
-  const remove = useApiMutation(() => api<WebSearchStatus>("/web-search", { method: "DELETE" }), {
-    success: "Tavily key removed — using the built-in search",
+  const remove = useApiMutation((provider: "tavily" | "keenable") => api<WebSearchStatus>(`/web-search/${provider}`, { method: "DELETE" }), {
+    success: "API key removed — web search updated",
     onSuccess: (r) => qc.setQueryData(KEY, r),
   });
+
+  const keyRow = (provider: "tavily" | "keenable", placeholder: string, hasKey: boolean, value: string, setValue: (v: string) => void) => (
+    <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
+      <Input
+        type="password"
+        className="w-full"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        autoComplete="off"
+      />
+      <div className="flex shrink-0 gap-2">
+        <Button type="button" disabled={value.trim().length < 16 || save.isPending} onClick={() => save.mutate({ provider, api_key: value.trim() })}>
+          Save
+        </Button>
+        {hasKey && (
+          <Button type="button" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate(provider)}>
+            <Trash2 className="size-4" /> Remove
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <section className="space-y-2">
@@ -42,35 +73,13 @@ export function WebSearchCard() {
           )}
           <div className="flex items-center justify-between gap-3 px-5 py-4">
             <div className="min-w-0">
-              <p className="text-sm font-medium">Search backend</p>
-              <p className="mt-0.5 text-xs leading-5 text-fg-subtle">
-                {s?.has_api_key
-                  ? "Tavily (agent-grade results, free tier 1,000 searches/month)."
-                  : "Built-in Bing results. Add a free Tavily key for cleaner, more relevant results."}
-              </p>
+              <p className="text-sm font-medium">Search providers</p>
+              <p className="mt-0.5 text-xs leading-5 text-fg-subtle">{s ? STATUS_TEXT[s.provider] : ""}</p>
             </div>
-            <Badge>{s?.has_api_key ? "Tavily" : "Built-in"}</Badge>
+            <Badge>{s?.provider === "keyless" ? "Keyless ring" : s?.provider === "tavily" ? "Tavily" : s?.provider === "keenable" ? "Keenable" : "…"}</Badge>
           </div>
-          <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center">
-            <Input
-              type="password"
-              className="w-full"
-              placeholder="Tavily API key (tvly-…)"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              autoComplete="off"
-            />
-            <div className="flex shrink-0 gap-2">
-              <Button type="button" disabled={key.trim().length < 16 || save.isPending} onClick={() => save.mutate(key.trim())}>
-                Save
-              </Button>
-              {s?.has_api_key && (
-                <Button type="button" variant="ghost" disabled={remove.isPending} onClick={() => remove.mutate()}>
-                  <Trash2 className="size-4" /> Remove
-                </Button>
-              )}
-            </div>
-          </div>
+          {keyRow("tavily", "Tavily API key (tvly-…) — optional", s?.has_tavily_key ?? false, tavilyKey, setTavilyKey)}
+          {keyRow("keenable", "Keenable API key — optional, free 100k requests/month", s?.has_keenable_key ?? false, keenableKey, setKeenableKey)}
         </div>
       </Card>
     </section>

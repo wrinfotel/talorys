@@ -163,7 +163,7 @@ describe("telegram owner chat", () => {
       t.setPaired(CHAT);
       await processUpdate(agentDeps(agent), update("/status"));
       expect(replies(api)[0]).toContain("Cloudflare Workers AI (the built-in free model)");
-      expect(replies(api)[0]).toContain("Web search: built-in (no API key)");
+      expect(replies(api)[0]).toContain("Web search: free ring");
       expect(replies(api)[0]).toContain("Notifications to this chat: on");
 
       await t.setNotifyEnabled(false);

@@ -548,14 +548,18 @@ export interface UsageCounters {
   mock_calls: number;
 }
 
-// ---------- Web search (optional Tavily key) ----------
+// ---------- Web search (optional provider keys over the keyless ring) ----------
 
 export const webSearchKeySchema = z.object({
+  /** Which provider's key is being saved. */
+  provider: z.enum(["tavily", "keenable"]),
   api_key: z.string().trim().min(16).max(200),
 });
 
+/** `provider` is the first provider the search ring will use: a keyed one, or the keyless ring. */
 export const webSearchStatusSchema = z.object({
-  provider: z.enum(["tavily", "bing"]),
-  has_api_key: z.boolean(),
+  provider: z.enum(["tavily", "keenable", "keyless"]),
+  has_tavily_key: z.boolean(),
+  has_keenable_key: z.boolean(),
 });
 export type WebSearchStatus = z.infer<typeof webSearchStatusSchema>;
