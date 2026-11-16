@@ -2,6 +2,13 @@
 
 All notable changes to Talorys are listed here. Versions match the `create-talorys` package.
 
+## 0.1.12 — 2026-11-16
+
+### Added
+
+- **A keyless search ring out of the box.** `web_search` now asks a ring of free, agent-grade search services with no setup: Exa and Parallel over their keyless MCP servers, Firecrawl's anonymous tier, with Bing's plain-HTML results as the always-available last resort. Any provider failure — rate limit, rejected key, 5xx — hands the query to the next one, and the skips ride along as a note. Every provider and format was live-tested from this codebase's environment.
+- **Optional Keenable key.** Settings → Integrations → Web search now takes a second key: Keenable (free key, 100,000 searches a month) joins Tavily, and whichever is configured answers first, ahead of the keyless ring. The old single-key storage is read as the Tavily key, so existing deployments keep working unchanged.
+
 ## 0.1.11 — 2026-11-15
 
 ### Fixed
